@@ -1,3 +1,4 @@
+from __future__ import annotations
 import uuid
 from typing import Optional
 
@@ -14,6 +15,12 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
 
 async def create_user(db: AsyncSession, user: User) -> User:
     db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user(db: AsyncSession, user: User) -> User:
     await db.commit()
     await db.refresh(user)
     return user

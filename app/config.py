@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Firebase (path to service account JSON file)
     firebase_credentials_path: str = "firebase-credentials.json"
 
+    # RevenueCat webhook shared secret
+    revenuecat_webhook_secret: str = ""
+
     # Ephemeris
     ephe_path: str = "/app/ephe"
 
