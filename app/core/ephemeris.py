@@ -54,15 +54,16 @@ def birth_to_julian_day(
 
 
 def _find_house(planet_lon: float, cusps: tuple) -> int:
-    for h in range(1, 13):
+    # cusps is 0-indexed: cusps[0]=house1 cusp ... cusps[11]=house12 cusp
+    for h in range(12):
         cusp_start = cusps[h]
-        cusp_end = cusps[h % 12 + 1]
+        cusp_end = cusps[(h + 1) % 12]
         if cusp_start <= cusp_end:
             if cusp_start <= planet_lon < cusp_end:
-                return h
-        else:
+                return h + 1
+        else:  # crosses 0° Aries
             if planet_lon >= cusp_start or planet_lon < cusp_end:
-                return h
+                return h + 1
     return 1
 
 
@@ -113,7 +114,7 @@ def calculate_natal_chart(jd: float, lat: float, lon: float) -> dict:
         planets[planet_name]["house"] = _find_house(planets[planet_name]["longitude"], cusps)
 
     houses = {
-        "cusps": [round(c, 4) for c in cusps[1:13]],
+        "cusps": [round(c, 4) for c in cusps[0:12]],
         "ascendant": round(ascmc[0], 4),
         "midheaven": round(ascmc[1], 4),
         "asc_sign": zodiac_sign(ascmc[0]),
