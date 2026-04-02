@@ -1,8 +1,8 @@
 from fastapi import Depends, Header, HTTPException, status
-from jose import JWTError, jwt
+from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.core.jwt_verifier import decode_supabase_token
 from app.db.session import AsyncSessionLocal
 from app.db.models import User
 
@@ -23,12 +23,7 @@ async def get_current_user(
     )
     try:
         token = authorization.removeprefix("Bearer ")
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        payload = await decode_supabase_token(token)
         user_id: str = payload.get("sub")
         if not user_id:
             raise credentials_exception
@@ -38,5 +33,8 @@ async def get_current_user(
     from app.db.repositories.user_repository import get_user_by_id
     user = await get_user_by_id(db, user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found — call /auth/register first")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found — call /auth/register first",
+        )
     return user

@@ -4,7 +4,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Database
     database_url: str
-    supabase_jwt_secret: str
+    supabase_url: str = "https://gacucpygzpximyxjmied.supabase.co"
+    supabase_jwt_secret: str = ""  # Optional — used as fallback for legacy tokens
 
     # Cache
     redis_url: str = "redis://localhost:6379"

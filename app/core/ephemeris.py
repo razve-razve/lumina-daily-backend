@@ -23,13 +23,11 @@ PLANETS = [
 ]
 
 ASPECTS = {
-    "conjunction":   (0,   8),
-    "opposition":    (180, 8),
-    "trine":         (120, 8),
-    "square":        (90,  7),
-    "sextile":       (60,  6),
-    "quincunx":      (150, 3),
-    "semi-sextile":  (30,  2),
+    "conjunction": (0,   8),
+    "opposition":  (180, 8),
+    "trine":       (120, 6),
+    "square":      (90,  6),
+    "sextile":     (60,  4),
 }
 
 
