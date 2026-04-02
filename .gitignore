@@ -6,5 +6,4 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .mypy_cache/
-ephe/
-*.se1
+# ephe files are intentionally committed to avoid download during build
