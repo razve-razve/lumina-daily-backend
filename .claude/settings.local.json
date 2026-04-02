@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.codeforafiction.com)",
+      "WebFetch(domain:docs.railway.com)",
+      "WebFetch(domain:python.hotexamples.com)",
+      "WebSearch",
+      "WebFetch(domain:developers.google.com)",
+      "Bash(brew install:*)",
+      "Bash(python3 -c \"import pdfplumber; print\\(''pdfplumber ok''\\)\")",
+      "Bash(python3 -c \"import pypdf; print\\(''pypdf ok''\\)\")",
+      "Bash(python3 -c \"import PyPDF2; print\\(''PyPDF2 ok''\\)\")",
+      "Read(//Users/Arseniy/Downloads/**)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3 -m pip install pdfplumber -q)",
+      "Bash(cp \"/Users/Arseniy/Downloads/Claude.pdf\" \"/tmp/spec.pdf\")",
+      "Bash(ls \"/Users/Arseniy/Desktop/lumina daily/\"*.pdf)",
+      "Bash(python3 -m pip install pypdf -q)",
+      "Bash(mdimport -d2 \"/Users/Arseniy/Desktop/lumina daily/Claude.pdf\")",
+      "Bash(qlmanage -p \"/Users/Arseniy/Desktop/lumina daily/Claude.pdf\")",
+      "Bash(python3 -m pip install pymupdf -q)",
+      "Bash(grep -r horoscope app/ --include=*.py -l)"
+    ]
+  }
+}
