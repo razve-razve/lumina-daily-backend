@@ -2,6 +2,9 @@ import swisseph as swe
 
 from app.config import settings
 
+# Set ephemeris path at import time so all threads see it immediately
+swe.set_ephe_path(settings.ephe_path)
+
 SIGNS = [
     "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
     "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces",
