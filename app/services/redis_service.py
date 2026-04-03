@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Redis cache via Upstash — stores daily advice so repeat requests are instant."""
 import json
 from typing import Optional

@@ -99,16 +99,6 @@ async def get_today_advice(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    import traceback as _tb
-    try:
-        return await _get_today_advice_inner(current_user, db)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}\n{_tb.format_exc()}")
-
-
-async def _get_today_advice_inner(current_user, db):
     today = datetime.now(timezone.utc).date()
 
     profile = await get_profile_by_user_id(db, current_user.id)

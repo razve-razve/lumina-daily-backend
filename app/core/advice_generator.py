@@ -5,12 +5,13 @@ Generates text for all 6 categories + a theme sentence.
 import asyncio
 import json
 
+from typing import Optional
 from openai import AsyncOpenAI
 
 from app.config import settings
 from app.core.modes import tone_for_mode
 
-_client: AsyncOpenAI | None = None
+_client = None  # type: Optional[AsyncOpenAI]
 
 
 def get_openai_client() -> AsyncOpenAI:
