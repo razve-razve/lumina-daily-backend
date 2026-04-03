@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import Depends, Header, HTTPException, status
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ async def get_current_user(
     authorization: str = Header(...),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    import traceback as _tb
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -29,9 +31,20 @@ async def get_current_user(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auth error: {type(exc).__name__}: {exc}\n{_tb.format_exc()}",
+        )
 
     from app.db.repositories.user_repository import get_user_by_id
-    user = await get_user_by_id(db, user_id)
+    try:
+        user = await get_user_by_id(db, user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB lookup error: {type(exc).__name__}: {exc}\n{_tb.format_exc()}",
+        )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

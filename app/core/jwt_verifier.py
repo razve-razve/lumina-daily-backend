@@ -5,6 +5,7 @@ with fallback to legacy HS256 shared secrets.
 """
 import logging
 
+from typing import Optional
 import httpx
 from jose import jwt
 from jose.exceptions import JWTError
@@ -13,7 +14,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_jwks_cache: dict | None = None
+_jwks_cache = None  # type: Optional[dict]
 
 
 async def _fetch_jwks() -> dict:
@@ -47,6 +48,9 @@ async def decode_supabase_token(token: str) -> dict:
         return payload
     except JWTError:
         pass
+    except Exception as exc:
+        logger.warning("JWKS fetch/decode failed with non-JWT error: %s", exc)
+        raise JWTError(f"JWKS error: {exc}") from exc
 
     # Fall back to legacy HS256 shared secret
     if settings.supabase_jwt_secret:
