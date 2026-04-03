@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -36,6 +37,16 @@ async def create_profile_endpoint(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    import traceback as _tb
+    try:
+        return await _create_profile_inner(body, current_user, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}\n{_tb.format_exc()}")
+
+
+async def _create_profile_inner(body, current_user, db):
     existing = await get_profile_by_user_id(db, current_user.id)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile already exists. Use PUT /profile/update.")
