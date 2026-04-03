@@ -82,6 +82,7 @@ async def create_profile_endpoint(
         moon_sign=moon_sign,
         rising_sign=rising,
         time_known=body.time_known,
+        name=body.name,
     )
 
 
@@ -135,4 +136,5 @@ async def get_natal_chart(
         moon_sign=moon_sign,
         rising_sign=rising,
         time_known=profile.time_known,
+        name=profile.name,
     )

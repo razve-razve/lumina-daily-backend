@@ -33,6 +33,7 @@ class NatalChartResponse(BaseModel):
     moon_sign: str
     rising_sign: str
     time_known: bool
+    name: str
 
 
 class ProfileResponse(BaseModel):
