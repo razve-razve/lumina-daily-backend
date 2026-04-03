@@ -95,6 +95,7 @@ def _calculate_aspects(planets: dict) -> list[dict]:
 
 
 def calculate_natal_chart(jd: float, lat: float, lon: float) -> dict:
+    swe.set_ephe_path(settings.ephe_path)
     flags = swe.FLG_SPEED
     planets: dict = {}
 
@@ -133,6 +134,7 @@ def calculate_natal_chart(jd: float, lat: float, lon: float) -> dict:
 
 
 def calculate_current_transits(jd: float) -> dict:
+    swe.set_ephe_path(settings.ephe_path)
     flags = swe.FLG_SPEED
     transits: dict = {}
     for planet_id, planet_name in PLANETS:
@@ -166,6 +168,7 @@ def calculate_transit_aspects_to_natal(transits: dict, natal_planets: dict) -> l
 
 
 def now_julian_day() -> float:
+    swe.set_ephe_path(settings.ephe_path)
     import datetime
     now = datetime.datetime.utcnow()
     decimal_hour = now.hour + now.minute / 60.0 + now.second / 3600.0
