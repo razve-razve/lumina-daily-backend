@@ -21,6 +21,7 @@ async def create_profile(db: AsyncSession, profile: Profile) -> Profile:
 
 
 async def update_profile(db: AsyncSession, profile: Profile) -> Profile:
+    db.add(profile)
     await db.commit()
     await db.refresh(profile)
     return profile

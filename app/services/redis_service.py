@@ -32,6 +32,11 @@ async def cache_advice(user_id: str, date: str, mode: str, data: dict, ttl_secon
     await r.setex(_advice_key(user_id, date, mode), ttl_seconds, json.dumps(data))
 
 
+async def delete_cached_advice(user_id: str, date: str, mode: str) -> None:
+    r = get_redis()
+    await r.delete(_advice_key(user_id, date, mode))
+
+
 async def close_redis() -> None:
     global _redis
     if _redis:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ephemeris import birth_to_julian_day, calculate_natal_chart
 from app.db.models import Profile
 from app.db.models import User
+from app.db.repositories.advice_repository import delete_advice
 from app.db.repositories.profile_repository import (
     create_profile,
     get_profile_by_user_id,
@@ -19,6 +21,7 @@ from app.schemas.profile import (
     ProfileResponse,
     ProfileUpdateRequest,
 )
+from app.services.redis_service import delete_cached_advice
 
 router = APIRouter()
 
@@ -29,6 +32,30 @@ def _chart_signs(natal_chart: dict) -> tuple[str, str, str]:
     moon_sign  = planets.get("Moon", {}).get("sign", "Unknown")
     rising     = natal_chart.get("houses", {}).get("asc_sign", "Unknown")
     return sun_sign, moon_sign, rising
+
+
+def _natal_response(profile: Profile) -> NatalChartResponse:
+    sun_sign, moon_sign, rising = _chart_signs(profile.natal_chart_json)
+    return NatalChartResponse(
+        natal_chart=profile.natal_chart_json,
+        sun_sign=sun_sign,
+        moon_sign=moon_sign,
+        rising_sign=rising,
+        time_known=profile.time_known,
+        name=profile.name,
+        gender=profile.gender,
+        date_of_birth=profile.date_of_birth,
+        time_of_birth=profile.time_of_birth,
+        city_name=profile.city_name,
+        latitude=profile.latitude,
+        longitude=profile.longitude,
+    )
+
+
+async def _invalidate_today_advice(db: AsyncSession, user_id, mode: str) -> None:
+    today = datetime.now(timezone.utc).date()
+    await delete_cached_advice(str(user_id), today.isoformat(), mode)
+    await delete_advice(db, user_id, today, mode)
 
 
 @router.post("/create", status_code=status.HTTP_201_CREATED, response_model=NatalChartResponse)
@@ -74,19 +101,10 @@ async def create_profile_endpoint(
         notification_time=body.notification_time,
     )
     await create_profile(db, profile)
-
-    sun_sign, moon_sign, rising = _chart_signs(natal_chart)
-    return NatalChartResponse(
-        natal_chart=natal_chart,
-        sun_sign=sun_sign,
-        moon_sign=moon_sign,
-        rising_sign=rising,
-        time_known=body.time_known,
-        name=body.name,
-    )
+    return _natal_response(profile)
 
 
-@router.put("/update", response_model=ProfileResponse)
+@router.put("/update", response_model=NatalChartResponse)
 async def update_profile_endpoint(
     body: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
@@ -105,19 +123,58 @@ async def update_profile_endpoint(
     if body.interpretation_mode is not None:
         profile.interpretation_mode = body.interpretation_mode
 
-    await update_profile(db, profile)
-    sun_sign, moon_sign, rising = _chart_signs(profile.natal_chart_json)
+    # If any birth data changed, recalculate natal chart
+    birth_fields = [body.date_of_birth, body.time_of_birth, body.latitude, body.longitude,
+                    body.timezone_id, body.utc_offset_at_birth, body.time_known, body.city_name]
+    if any(f is not None for f in birth_fields):
+        if body.date_of_birth is not None:
+            profile.date_of_birth = body.date_of_birth
+        if body.time_of_birth is not None:
+            profile.time_of_birth = body.time_of_birth
+        if body.time_known is not None:
+            profile.time_known = body.time_known
+        if body.city_name is not None:
+            profile.city_name = body.city_name
+        if body.latitude is not None:
+            profile.latitude = body.latitude
+        if body.longitude is not None:
+            profile.longitude = body.longitude
+        if body.timezone_id is not None:
+            profile.timezone_id = body.timezone_id
+        if body.utc_offset_at_birth is not None:
+            profile.utc_offset_at_birth = body.utc_offset_at_birth
 
-    return ProfileResponse(
-        name=profile.name,
-        gender=profile.gender,
-        sun_sign=sun_sign,
-        moon_sign=moon_sign,
-        rising_sign=rising,
-        time_known=profile.time_known,
-        city_name=profile.city_name,
-        interpretation_mode=profile.interpretation_mode,
-    )
+        birth_time = profile.time_of_birth
+        jd = await asyncio.get_event_loop().run_in_executor(
+            None,
+            birth_to_julian_day,
+            profile.date_of_birth.year,
+            profile.date_of_birth.month,
+            profile.date_of_birth.day,
+            birth_time.hour,
+            birth_time.minute,
+            birth_time.second,
+            profile.utc_offset_at_birth,
+        )
+        profile.natal_chart_json = await asyncio.get_event_loop().run_in_executor(
+            None, calculate_natal_chart, jd, profile.latitude, profile.longitude
+        )
+
+    advice_affecting_change = any([
+        body.name is not None and body.name != profile.name,
+        body.gender is not None and body.gender != profile.gender,
+        body.date_of_birth is not None,
+        body.time_of_birth is not None,
+        body.latitude is not None,
+        body.longitude is not None,
+    ])
+
+    await update_profile(db, profile)
+
+    if advice_affecting_change:
+        await _invalidate_today_advice(db, current_user.id, profile.interpretation_mode)
+
+    return _natal_response(profile)
 
 
 @router.get("/natal", response_model=NatalChartResponse)
@@ -128,13 +185,4 @@ async def get_natal_chart(
     profile = await get_profile_by_user_id(db, current_user.id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
-
-    sun_sign, moon_sign, rising = _chart_signs(profile.natal_chart_json)
-    return NatalChartResponse(
-        natal_chart=profile.natal_chart_json,
-        sun_sign=sun_sign,
-        moon_sign=moon_sign,
-        rising_sign=rising,
-        time_known=profile.time_known,
-        name=profile.name,
-    )
+    return _natal_response(profile)

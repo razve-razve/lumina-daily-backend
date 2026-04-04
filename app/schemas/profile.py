@@ -25,6 +25,15 @@ class ProfileUpdateRequest(BaseModel):
     gender: Optional[str] = None
     notification_time: Optional[time] = None
     interpretation_mode: Optional[str] = None
+    # Birth data — when any of these are provided, natal chart is recalculated
+    date_of_birth: Optional[date] = None
+    time_of_birth: Optional[time] = None
+    time_known: Optional[bool] = None
+    city_name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    timezone_id: Optional[str] = None
+    utc_offset_at_birth: Optional[int] = None
 
 
 class NatalChartResponse(BaseModel):
@@ -34,6 +43,12 @@ class NatalChartResponse(BaseModel):
     rising_sign: str
     time_known: bool
     name: str
+    gender: str
+    date_of_birth: date
+    time_of_birth: time
+    city_name: str
+    latitude: float
+    longitude: float
 
 
 class ProfileResponse(BaseModel):

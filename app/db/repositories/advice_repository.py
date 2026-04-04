@@ -29,6 +29,22 @@ async def create_advice(db: AsyncSession, advice: DailyAdvice) -> DailyAdvice:
     return advice
 
 
+async def delete_advice(
+    db: AsyncSession, user_id: uuid.UUID, target_date: date, mode: str
+) -> None:
+    result = await db.execute(
+        select(DailyAdvice).where(
+            DailyAdvice.user_id == user_id,
+            DailyAdvice.date == target_date,
+            DailyAdvice.mode == mode,
+        )
+    )
+    advice = result.scalar_one_or_none()
+    if advice:
+        await db.delete(advice)
+        await db.commit()
+
+
 async def get_recent_advice(
     db: AsyncSession,
     user_id: uuid.UUID,
