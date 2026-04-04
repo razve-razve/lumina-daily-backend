@@ -1,17 +1,17 @@
 """
 AI advice generation — one call per category per user per day.
 Generates text for all 6 categories + a theme sentence.
+Each interpretation mode produces a distinctly different voice and lens.
 """
 import asyncio
-import json
-
 from typing import Optional
+
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.core.modes import tone_for_mode
+from app.core.modes import get_mode_config
 
-_client = None  # type: Optional[AsyncOpenAI]
+_client: Optional[AsyncOpenAI] = None
 
 
 def get_openai_client() -> AsyncOpenAI:
@@ -24,55 +24,75 @@ def get_openai_client() -> AsyncOpenAI:
 CATEGORIES = [
     ("love",          "Love & Relationships"),
     ("work",          "Work & Focus"),
-    ("energy",        "Energy"),
+    ("energy",        "Energy & Vitality"),
     ("communication", "Communication"),
-    ("mood",          "Mood"),
+    ("mood",          "Mood & Inner State"),
     ("risk",          "Watch For"),
 ]
-
-_SYSTEM_TEMPLATE = (
-    "You are an astrology advisor for the app Lumina Daily. "
-    "Write personalized daily guidance in {language}. "
-    "Mode: {mode}. Tone: {tone} "
-    "Be warm, specific, and varied. "
-    "Never repeat phrases used in the last 7 days. "
-    "Do not mention specific degree numbers or technical jargon. "
-    "Length: 2–4 sentences."
-)
-
-_USER_TEMPLATE = (
-    "User: {name}, {gender}, Sun in {sun_sign}, Moon in {moon_sign}, Rising {rising}.\n"
-    "Today's aspects: {aspect_list}.\n"
-    "Category: {category}.\n"
-    "Write today's guidance."
-)
-
-_THEME_SYSTEM = (
-    "You are an astrology advisor. Write exactly one sentence — the key theme for this person's day "
-    "based on their natal chart and today's planetary transits. No jargon, no degree numbers. "
-    "Warm and direct. Reply with the sentence only."
-)
-
-_THEME_USER = (
-    "Sun in {sun_sign}, Moon in {moon_sign}, Rising {rising}. "
-    "Today's moon phase: {moon_phase}. "
-    "Key transits: {aspect_list}. "
-    "What is the main theme for today?"
-)
-
-
-def _format_aspects(transit_aspects: list[dict]) -> str:
-    if not transit_aspects:
-        return "no major exact transits"
-    top = sorted(transit_aspects, key=lambda a: a["orb"])[:6]
-    return ", ".join(
-        f"{a['transiting_planet']} {a['aspect']} natal {a['natal_planet']} (orb {a['orb']}°)"
-        for a in top
-    )
 
 
 def _language_name(code: str) -> str:
     return {"en": "English", "ru": "Russian"}.get(code, "English")
+
+
+def _format_aspects(transit_aspects: list[dict]) -> str:
+    if not transit_aspects:
+        return "no major exact transits today"
+    top = sorted(transit_aspects, key=lambda a: a["orb"])[:6]
+    return ", ".join(
+        f"{a['transiting_planet']} {a['aspect']} natal {a['natal_planet']} "
+        f"(orb {a['orb']:.1f}°)"
+        for a in top
+    )
+
+
+def _build_system_prompt(mode: str, language: str) -> str:
+    """Build a rich, mode-specific system prompt for category guidance."""
+    cfg = get_mode_config(mode)
+    lang = _language_name(language)
+    return (
+        f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
+        f"Language: Write entirely in {lang}.\n\n"
+        f"Style: {cfg.style}\n\n"
+        f"Concepts and vocabulary to draw on: {cfg.concepts}\n\n"
+        f"Strictly avoid: {cfg.avoid}\n\n"
+        f"Additional rules:\n"
+        f"- Be specific to THIS person's natal placements and TODAY's actual aspects.\n"
+        f"- Never mention degree numbers (e.g. '15° Scorpio').\n"
+        f"- Vary your sentence structure and opening words — never start two consecutive "
+        f"readings the same way.\n"
+        f"- Length: 2–4 sentences. No bullet points. No headers. Plain prose only."
+    )
+
+
+def _build_theme_prompt(mode: str, language: str) -> str:
+    """Build a mode-aware system prompt for the daily theme sentence."""
+    cfg = get_mode_config(mode)
+    lang = _language_name(language)
+    return (
+        f"You are {cfg.persona}, writing for the app Lumina Daily.\n"
+        f"Write exactly ONE sentence — the key theme for this person's day — "
+        f"in {lang}.\n"
+        f"The sentence should reflect your mode's lens: {cfg.style[:120]}…\n"
+        f"No degree numbers. No jargon. Warm and direct. One sentence only."
+    )
+
+
+_USER_TEMPLATE = (
+    "Person: {name} ({gender}). "
+    "Sun in {sun_sign}, Moon in {moon_sign}, Rising {rising}.\n"
+    "Today's active transits: {aspect_list}.\n"
+    "Moon phase: {moon_phase}.\n"
+    "Life area to address: {category}.\n\n"
+    "Write today's guidance for this person in this life area."
+)
+
+_THEME_USER = (
+    "Person: Sun in {sun_sign}, Moon in {moon_sign}, Rising {rising}.\n"
+    "Moon phase: {moon_phase}.\n"
+    "Active transits: {aspect_list}.\n\n"
+    "What is the single defining theme for this person's day?"
+)
 
 
 async def generate_category_text(
@@ -84,15 +104,12 @@ async def generate_category_text(
     sun_sign: str,
     moon_sign: str,
     rising: str,
+    moon_phase: str,
     aspect_list: str,
     category_label: str,
 ) -> str:
     client = get_openai_client()
-    system = _SYSTEM_TEMPLATE.format(
-        language=_language_name(language),
-        mode=mode,
-        tone=tone_for_mode(mode),
-    )
+    system = _build_system_prompt(mode, language)
     user_msg = _USER_TEMPLATE.format(
         name=name,
         gender=gender,
@@ -100,6 +117,7 @@ async def generate_category_text(
         moon_sign=moon_sign,
         rising=rising,
         aspect_list=aspect_list,
+        moon_phase=moon_phase,
         category=category_label,
     )
     response = await client.chat.completions.create(
@@ -108,8 +126,8 @@ async def generate_category_text(
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        temperature=0.85,
-        max_tokens=200,
+        temperature=0.88,
+        max_tokens=220,
     )
     return response.choices[0].message.content.strip()
 
@@ -122,8 +140,10 @@ async def generate_theme(
     moon_phase: str,
     aspect_list: str,
     language: str,
+    mode: str,
 ) -> str:
     client = get_openai_client()
+    system = _build_theme_prompt(mode, language)
     user_msg = _THEME_USER.format(
         sun_sign=sun_sign,
         moon_sign=moon_sign,
@@ -131,15 +151,14 @@ async def generate_theme(
         moon_phase=moon_phase,
         aspect_list=aspect_list,
     )
-    system = _THEME_SYSTEM + f" Reply in {_language_name(language)}."
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        temperature=0.8,
-        max_tokens=80,
+        temperature=0.82,
+        max_tokens=90,
     )
     return response.choices[0].message.content.strip()
 
@@ -165,7 +184,6 @@ async def generate_all_advice(
     rising    = natal_chart.get("houses", {}).get("asc_sign", "unknown")
     aspect_list = _format_aspects(transit_aspects)
 
-    # Build all coroutines
     theme_coro = generate_theme(
         sun_sign=sun_sign,
         moon_sign=moon_sign,
@@ -173,6 +191,7 @@ async def generate_all_advice(
         moon_phase=moon_phase,
         aspect_list=aspect_list,
         language=language,
+        mode=mode,
     )
 
     category_coros = [
@@ -184,13 +203,13 @@ async def generate_all_advice(
             sun_sign=sun_sign,
             moon_sign=moon_sign,
             rising=rising,
+            moon_phase=moon_phase,
             aspect_list=aspect_list,
             category_label=label,
         )
         for _, label in CATEGORIES
     ]
 
-    # Run all 7 calls concurrently
     results = await asyncio.gather(theme_coro, *category_coros)
 
     theme_text = results[0]
