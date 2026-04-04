@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.modes import ALL_MODE_NAMES, FREE_MODES
@@ -12,6 +13,38 @@ from app.dependencies import get_current_user, get_db
 from app.schemas.advice import SettingsModeRequest, SettingsNotificationsRequest
 
 router = APIRouter()
+
+
+class SubscriptionRequest(BaseModel):
+    transaction_id: str
+    product_id: str
+
+
+@router.get("/me")
+async def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "user_id": str(current_user.id),
+        "language": current_user.language,
+        "subscription_status": current_user.subscription_status,
+    }
+
+
+@router.post("/subscription")
+async def update_subscription(
+    body: SubscriptionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_user_by_id(db, str(current_user.id))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.subscription_status = "pro"
+    db.add(user)
+    await db.commit()
+    return {"subscription_status": "pro"}
 
 
 @router.put("/mode")
