@@ -21,7 +21,7 @@ from app.db.repositories.advice_repository import create_advice, get_advice
 from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.db.repositories.user_repository import get_all_active_users
 from app.db.session import AsyncSessionLocal
-from app.services.fcm_service import send_daily_notification
+from app.services.apns_service import send_daily_notification
 from app.services.redis_service import cache_advice, get_cached_advice
 
 logger = logging.getLogger(__name__)

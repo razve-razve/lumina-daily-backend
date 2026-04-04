@@ -15,8 +15,15 @@ class Settings(BaseSettings):
     timezonedb_api_key: str
     openai_api_key: str
 
-    # Firebase (path to service account JSON file)
+    # Firebase (path to service account JSON file) — legacy, replaced by APNs
     firebase_credentials_path: str = "firebase-credentials.json"
+
+    # APNs (Apple Push Notification service) — token-based auth
+    apns_auth_key: str = ""       # full .p8 file contents (newlines as \n)
+    apns_key_id: str = ""         # 10-char key ID
+    apns_team_id: str = ""        # 10-char Apple team ID
+    apns_bundle_id: str = ""      # e.g. com.yourname.lumina-daily
+    apns_production: str = "true" # "false" for sandbox/TestFlight
 
     # RevenueCat webhook shared secret
     revenuecat_webhook_secret: str = ""
