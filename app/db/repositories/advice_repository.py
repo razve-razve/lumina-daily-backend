@@ -10,15 +10,17 @@ from app.db.models import DailyAdvice
 
 
 async def get_advice(
-    db: AsyncSession, user_id: uuid.UUID, target_date: date, mode: str
+    db: AsyncSession, user_id: uuid.UUID, target_date: date, mode: str,
+    language: Optional[str] = None,
 ) -> Optional[DailyAdvice]:
-    result = await db.execute(
-        select(DailyAdvice).where(
-            DailyAdvice.user_id == user_id,
-            DailyAdvice.date == target_date,
-            DailyAdvice.mode == mode,
-        )
-    )
+    filters = [
+        DailyAdvice.user_id == user_id,
+        DailyAdvice.date == target_date,
+        DailyAdvice.mode == mode,
+    ]
+    if language:
+        filters.append(DailyAdvice.language == language)
+    result = await db.execute(select(DailyAdvice).where(*filters))
     return result.scalar_one_or_none()
 
 

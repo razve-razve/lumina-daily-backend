@@ -17,24 +17,24 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
-def _advice_key(user_id: str, date: str, mode: str) -> str:
-    return f"advice:{user_id}:{date}:{mode}"
+def _advice_key(user_id: str, date: str, mode: str, language: str = "en") -> str:
+    return f"advice:{user_id}:{date}:{mode}:{language}"
 
 
-async def get_cached_advice(user_id: str, date: str, mode: str) -> Optional[dict]:
+async def get_cached_advice(user_id: str, date: str, mode: str, language: str = "en") -> Optional[dict]:
     r = get_redis()
-    raw = await r.get(_advice_key(user_id, date, mode))
+    raw = await r.get(_advice_key(user_id, date, mode, language))
     return json.loads(raw) if raw else None
 
 
-async def cache_advice(user_id: str, date: str, mode: str, data: dict, ttl_seconds: int = 86400) -> None:
+async def cache_advice(user_id: str, date: str, mode: str, data: dict, language: str = "en", ttl_seconds: int = 86400) -> None:
     r = get_redis()
-    await r.setex(_advice_key(user_id, date, mode), ttl_seconds, json.dumps(data))
+    await r.setex(_advice_key(user_id, date, mode, language), ttl_seconds, json.dumps(data))
 
 
-async def delete_cached_advice(user_id: str, date: str, mode: str) -> None:
+async def delete_cached_advice(user_id: str, date: str, mode: str, language: str = "en") -> None:
     r = get_redis()
-    await r.delete(_advice_key(user_id, date, mode))
+    await r.delete(_advice_key(user_id, date, mode, language))
 
 
 async def close_redis() -> None:

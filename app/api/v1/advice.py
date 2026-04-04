@@ -107,22 +107,25 @@ async def get_today_advice(
 
     mode = profile.interpretation_mode
 
-    # 1. Check Redis cache
-    cached = await get_cached_advice(str(current_user.id), today.isoformat(), mode)
+    lang = current_user.language
+    mode = profile.interpretation_mode
+
+    # 1. Check Redis cache (keyed by language so EN and RU are stored separately)
+    cached = await get_cached_advice(str(current_user.id), today.isoformat(), mode, language=lang)
     if cached and "advice" in cached:
         return DailyAdviceResponse(**cached["advice"])
 
-    # 2. Check database
-    existing = await get_advice(db, current_user.id, today, mode)
+    # 2. Check database — filter by language so stale translations are never served
+    existing = await get_advice(db, current_user.id, today, mode, language=lang)
     if existing:
         response = _to_response(existing)
-        await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")})
+        await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
         return response
 
-    # 3. Generate fresh
-    advice = await _generate_and_store(profile, current_user.id, current_user.language, today, db)
+    # 3. Generate fresh in the user's current language
+    advice = await _generate_and_store(profile, current_user.id, lang, today, db)
     response = _to_response(advice)
-    await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")})
+    await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
     return response
 
 
