@@ -105,9 +105,7 @@ async def get_today_advice(
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found. Complete onboarding first.")
 
-    mode = profile.interpretation_mode
-
-    lang = current_user.language
+    lang = current_user.language or "en"
     mode = profile.interpretation_mode
 
     # 1. Check Redis cache (keyed by language so EN and RU are stored separately)
@@ -148,5 +146,5 @@ async def get_advice_for_date(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot generate advice for future dates.")
 
     # Past date — generate on demand
-    advice = await _generate_and_store(profile, current_user.id, current_user.language, target_date, db)
+    advice = await _generate_and_store(profile, current_user.id, current_user.language or "en", target_date, db)
     return _to_response(advice)

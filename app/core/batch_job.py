@@ -128,7 +128,7 @@ async def run_daily_batch() -> None:
         for i in range(0, len(users), batch_size):
             batch = users[i:i + batch_size]
             tasks = [
-                _process_user(u.id, u.language, transits, {}, today, db)
+                _process_user(u.id, u.language or "en", transits, {}, today, db)
                 for u in batch
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -68,7 +68,7 @@ async def update_language(
     user = await get_user_by_id(db, str(current_user.id))
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    old_language = user.language  # capture before overwriting
+    old_language = user.language or "en"  # capture before overwriting; default en if not set
     user.language = body.language
     db.add(user)
     await db.commit()
