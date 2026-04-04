@@ -20,6 +20,10 @@ class SubscriptionRequest(BaseModel):
     product_id: str
 
 
+class LanguageRequest(BaseModel):
+    language: str   # "en" | "ru"
+
+
 @router.get("/me")
 async def get_me(
     current_user: User = Depends(get_current_user),
@@ -45,6 +49,27 @@ async def update_subscription(
     db.add(user)
     await db.commit()
     return {"subscription_status": "pro"}
+
+
+@router.put("/language")
+async def update_language(
+    body: LanguageRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    supported = {"en", "ru"}
+    if body.language not in supported:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported language. Choose from: {supported}",
+        )
+    user = await get_user_by_id(db, str(current_user.id))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.language = body.language
+    db.add(user)
+    await db.commit()
+    return {"language": body.language}
 
 
 @router.put("/mode")
