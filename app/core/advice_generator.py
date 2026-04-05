@@ -76,7 +76,8 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"- Never mention degree numbers (e.g. '15° Scorpio').\n"
         f"- Vary your sentence structure and opening words — never start two consecutive "
         f"readings the same way.\n"
-        f"- Length: 2–4 sentences. No bullet points. No headers. Plain prose only."
+        f"- Length: EXACTLY 3–4 sentences. Stop after the 4th sentence. "
+        f"No bullet points. No headers. No paragraph breaks. Plain prose only."
         f"{russian_block}"
     )
 
@@ -147,7 +148,7 @@ async def generate_category_text(
             {"role": "user",   "content": user_msg},
         ],
         temperature=0.88,
-        max_tokens=300,
+        max_tokens=400,
     )
     return response.choices[0].message.content.strip()
 
