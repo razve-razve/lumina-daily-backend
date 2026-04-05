@@ -72,10 +72,11 @@ def build_transit_tags(transit_aspects: list[dict], transits: dict) -> list[str]
     """
     tags = []
 
-    # Retrograde planets
+    # Retrograde planets (skip North/South Node — always retrograde, not informative)
+    always_retrograde = {"North Node", "South Node"}
     for planet, data in transits.items():
-        if data.get("retrograde"):
-            tags.append(f"{planet}\u211e")  # ℞ symbol
+        if data.get("retrograde") and planet not in always_retrograde:
+            tags.append(f"{planet} ℞")
 
     # Top 4 tightest aspects
     sorted_aspects = sorted(transit_aspects, key=lambda a: a["orb"])[:4]
