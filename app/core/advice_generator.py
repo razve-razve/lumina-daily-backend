@@ -46,10 +46,25 @@ def _format_aspects(transit_aspects: list[dict]) -> str:
     )
 
 
+_RUSSIAN_RULES = (
+    "Russian-specific rules (CRITICAL):\n"
+    "- Always address the person using the formal ВЫ (вы/вас/вам/вами/вашу/ваш/ваше/ваши). "
+    "Never use ты/тебя/тебе/твой.\n"
+    "- Apply correct Russian grammatical gender to all astrological terms: "
+    "Луна (feminine — натальная Луна, вашу натальную Луну), "
+    "Венера (feminine), Марс (masculine — натальный Марс, вашего натального Марса), "
+    "Меркурий (masculine), Юпитер (masculine), Сатурн (masculine), "
+    "Уран (masculine), Нептун (masculine), Плутон (masculine), Солнце (neuter — натальное Солнце).\n"
+    "- Write natural, literary Russian — avoid word-for-word calques from English structure.\n"
+    "- Complete every sentence fully. Never cut off mid-sentence."
+)
+
+
 def _build_system_prompt(mode: str, language: str) -> str:
     """Build a rich, mode-specific system prompt for category guidance."""
     cfg = get_mode_config(mode)
     lang = _language_name(language)
+    russian_block = f"\n\n{_RUSSIAN_RULES}" if language == "ru" else ""
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
         f"Language: Write entirely in {lang}.\n\n"
@@ -62,6 +77,7 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"- Vary your sentence structure and opening words — never start two consecutive "
         f"readings the same way.\n"
         f"- Length: 2–4 sentences. No bullet points. No headers. Plain prose only."
+        f"{russian_block}"
     )
 
 
@@ -69,12 +85,16 @@ def _build_theme_prompt(mode: str, language: str) -> str:
     """Build a mode-aware system prompt for the daily theme sentence."""
     cfg = get_mode_config(mode)
     lang = _language_name(language)
+    russian_note = (
+        " Use formal ВЫ address. Apply correct grammatical gender to all planet names."
+        if language == "ru" else ""
+    )
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n"
         f"Write exactly ONE sentence — the key theme for this person's day — "
         f"in {lang}.\n"
         f"The sentence should reflect your mode's lens: {cfg.style[:120]}…\n"
-        f"No degree numbers. No jargon. Warm and direct. One sentence only."
+        f"No degree numbers. No jargon. Warm and direct. One sentence only.{russian_note}"
     )
 
 
@@ -127,7 +147,7 @@ async def generate_category_text(
             {"role": "user",   "content": user_msg},
         ],
         temperature=0.88,
-        max_tokens=220,
+        max_tokens=300,
     )
     return response.choices[0].message.content.strip()
 
