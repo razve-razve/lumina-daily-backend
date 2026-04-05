@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DailyAdvice
@@ -45,6 +45,19 @@ async def delete_advice(
     if advice:
         await db.delete(advice)
         await db.commit()
+
+
+async def delete_all_today_advice(
+    db: AsyncSession, user_id: uuid.UUID, target_date: date
+) -> None:
+    """Delete all advice rows for a user on a given date (all modes). Single commit."""
+    await db.execute(
+        delete(DailyAdvice).where(
+            DailyAdvice.user_id == user_id,
+            DailyAdvice.date == target_date,
+        )
+    )
+    await db.commit()
 
 
 async def get_recent_advice(

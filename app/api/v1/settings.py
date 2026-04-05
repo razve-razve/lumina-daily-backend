@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.modes import ALL_MODE_NAMES, FREE_MODES
 from app.db.models import User
-from app.db.repositories.advice_repository import delete_advice
+from app.db.repositories.advice_repository import delete_all_today_advice
 from app.db.repositories.profile_repository import get_profile_by_user_id, update_profile
 from app.db.repositories.user_repository import get_user_by_id
 from app.dependencies import get_current_user, get_db
@@ -73,12 +73,12 @@ async def update_language(
     db.add(user)
     await db.commit()
 
-    # Invalidate ALL today's advice across every mode so everything regenerates
-    # in the new language — not just the current mode
+    # Invalidate ALL today's advice so everything regenerates in the new language.
+    # Single bulk DB delete (one commit) instead of 6 separate ones.
     today = datetime.now(timezone.utc).date()
     for mode in ALL_MODE_NAMES:
         await delete_cached_advice(str(current_user.id), today.isoformat(), mode, language=old_language)
-        await delete_advice(db, current_user.id, today, mode)
+    await delete_all_today_advice(db, current_user.id, today)
 
     return {"language": body.language}
 

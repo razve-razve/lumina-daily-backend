@@ -57,7 +57,14 @@
       "Read(//usr/local/bin/**)",
       "Read(//Users/Arseniy/.npm/bin/**)",
       "Bash(curl -s -X POST \"https://lumina-daily-backend-production.up.railway.app/api/v1/profile/create\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer test\" -d '{:*)",
-      "Bash(curl -s \"https://lumina-daily-backend-production.up.railway.app/api/v1/timezone/resolve?lat=55.757&lng=37.615&timestamp=1743674400\")"
+      "Bash(curl -s \"https://lumina-daily-backend-production.up.railway.app/api/v1/timezone/resolve?lat=55.757&lng=37.615&timestamp=1743674400\")",
+      "Bash(railway status:*)",
+      "Bash(curl -s \"https://lumina-daily-production.up.railway.app/health\")",
+      "Bash(curl -s -X GET \"https://lumina-daily-backend-production.up.railway.app/api/v1/advice/today\" -H \"Authorization: Bearer fake_token\")",
+      "Bash(npm install:*)",
+      "Bash(curl -fsSL https://railway.app/install.sh)",
+      "Bash(sh)",
+      "Bash(RAILWAY_INSTALL_DIR=\"$HOME/.local/bin\" sh)"
     ]
   }
 }
