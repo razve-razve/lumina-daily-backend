@@ -4,6 +4,7 @@ from datetime import date
 from typing import Optional
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DailyAdvice
@@ -25,10 +26,18 @@ async def get_advice(
 
 
 async def create_advice(db: AsyncSession, advice: DailyAdvice) -> DailyAdvice:
-    db.add(advice)
-    await db.commit()
-    await db.refresh(advice)
-    return advice
+    try:
+        db.add(advice)
+        await db.commit()
+        await db.refresh(advice)
+        return advice
+    except IntegrityError:
+        await db.rollback()
+        # A concurrent request already inserted this record — fetch and return it
+        existing = await get_advice(db, advice.user_id, advice.date, advice.mode)
+        if existing:
+            return existing
+        raise
 
 
 async def delete_advice(
