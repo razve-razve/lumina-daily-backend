@@ -100,30 +100,34 @@ async def get_today_advice(
     db: AsyncSession = Depends(get_db),
 ):
     today = datetime.now(timezone.utc).date()
+    # Extract plain Python values immediately — db.commit() inside create_advice
+    # expires all ORM objects in the session, making later attribute access fail
+    # with MissingGreenlet in an async context.
+    user_id = current_user.id
+    lang = current_user.language or "en"
 
-    profile = await get_profile_by_user_id(db, current_user.id)
+    profile = await get_profile_by_user_id(db, user_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found. Complete onboarding first.")
 
-    lang = current_user.language or "en"
     mode = profile.interpretation_mode
 
     # 1. Check Redis cache (keyed by language so EN and RU are stored separately)
-    cached = await get_cached_advice(str(current_user.id), today.isoformat(), mode, language=lang)
+    cached = await get_cached_advice(str(user_id), today.isoformat(), mode, language=lang)
     if cached and "advice" in cached:
         return DailyAdviceResponse(**cached["advice"])
 
     # 2. Check database — filter by language so stale translations are never served
-    existing = await get_advice(db, current_user.id, today, mode, language=lang)
+    existing = await get_advice(db, user_id, today, mode, language=lang)
     if existing:
         response = _to_response(existing)
-        await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
+        await cache_advice(str(user_id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
         return response
 
     # 3. Generate fresh in the user's current language
-    advice = await _generate_and_store(profile, current_user.id, lang, today, db)
+    advice = await _generate_and_store(profile, user_id, lang, today, db)
     response = _to_response(advice)
-    await cache_advice(str(current_user.id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
+    await cache_advice(str(user_id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
     return response
 
 
@@ -133,11 +137,14 @@ async def get_advice_for_date(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    profile = await get_profile_by_user_id(db, current_user.id)
+    user_id = current_user.id
+    lang = current_user.language or "en"
+
+    profile = await get_profile_by_user_id(db, user_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
 
-    existing = await get_advice(db, current_user.id, target_date, profile.interpretation_mode)
+    existing = await get_advice(db, user_id, target_date, profile.interpretation_mode)
     if existing:
         return _to_response(existing)
 
@@ -146,5 +153,5 @@ async def get_advice_for_date(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot generate advice for future dates.")
 
     # Past date — generate on demand
-    advice = await _generate_and_store(profile, current_user.id, current_user.language or "en", target_date, db)
+    advice = await _generate_and_store(profile, user_id, lang, target_date, db)
     return _to_response(advice)
