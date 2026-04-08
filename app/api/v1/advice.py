@@ -144,7 +144,7 @@ async def get_advice_for_date(
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
 
-    existing = await get_advice(db, user_id, target_date, profile.interpretation_mode)
+    existing = await get_advice(db, user_id, target_date, profile.interpretation_mode, language=lang)
     if existing:
         return _to_response(existing)
 

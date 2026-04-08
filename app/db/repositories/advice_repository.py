@@ -34,7 +34,7 @@ async def create_advice(db: AsyncSession, advice: DailyAdvice) -> DailyAdvice:
     except IntegrityError:
         await db.rollback()
         # A concurrent request already inserted this record — fetch and return it
-        existing = await get_advice(db, advice.user_id, advice.date, advice.mode)
+        existing = await get_advice(db, advice.user_id, advice.date, advice.mode, language=advice.language)
         if existing:
             return existing
         raise
