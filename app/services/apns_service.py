@@ -45,8 +45,12 @@ def _make_jwt() -> str:
     if not key_pem or not key_id or not team_id:
         raise RuntimeError("APNs not configured — set APNS_AUTH_KEY, APNS_KEY_ID, APNS_TEAM_ID")
 
-    # p8 files use \\n in env vars — normalize to real newlines
-    key_pem = key_pem.replace("\\n", "\n")
+    # Normalize various escape forms that result from different env var storage methods
+    key_pem = key_pem.replace("\\\\n", "\n")  # double-escaped
+    key_pem = key_pem.replace("\\n", "\n")    # single-escaped
+    key_pem = key_pem.replace("\r\n", "\n")   # Windows line endings
+    key_pem = key_pem.replace("\r", "\n")     # old Mac line endings
+    key_pem = key_pem.strip()
 
     token = jose_jwt.encode(
         {"iss": team_id, "iat": int(now)},
