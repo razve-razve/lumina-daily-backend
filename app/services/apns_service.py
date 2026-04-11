@@ -76,8 +76,8 @@ async def send_daily_notification(device_token: str, language: str) -> bool:
 
     try:
         jwt_token = _make_jwt()
-    except RuntimeError as e:
-        logger.warning(f"APNs config missing: {e}")
+    except Exception as e:
+        logger.warning(f"APNs JWT error: {e}")
         return False
 
     url = f"{_apns_base_url()}/3/device/{device_token}"

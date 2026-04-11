@@ -41,8 +41,11 @@ async def test_push(x_admin_secret: str = Header(...)):
 
     results = []
     for p in profiles:
-        success = await send_daily_notification(p.fcm_token, "en")
-        results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": success})
+        try:
+            success = await send_daily_notification(p.fcm_token, "en")
+            results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": success})
+        except Exception as e:
+            results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": False, "error": str(e)})
 
     return {"status": "done", "results": results}
 
