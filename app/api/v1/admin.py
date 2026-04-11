@@ -39,15 +39,34 @@ async def test_push(x_admin_secret: str = Header(...)):
     if not profiles:
         return {"status": "no device tokens found in database — token was never synced"}
 
+    import httpx
+    from app.services.apns_service import _apns_base_url, _make_jwt
+    from app.config import settings as cfg
+
     results = []
     for p in profiles:
         try:
-            success = await send_daily_notification(p.fcm_token, "en")
-            results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": success})
+            jwt_token = _make_jwt()
+            url = f"{_apns_base_url()}/3/device/{p.fcm_token}"
+            headers = {
+                "authorization": f"bearer {jwt_token}",
+                "apns-topic": cfg.apns_bundle_id,
+                "apns-push-type": "alert",
+                "apns-priority": "10",
+            }
+            payload = {"aps": {"alert": {"title": "Test", "body": "Lumina test notification"}, "sound": "default"}}
+            async with httpx.AsyncClient(http2=True, timeout=10) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            results.append({
+                "profile_id": str(p.id),
+                "token_prefix": p.fcm_token[:16],
+                "apns_status": resp.status_code,
+                "apns_reason": resp.text or "OK",
+            })
         except Exception as e:
-            results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": False, "error": str(e)})
+            results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "error": str(e)})
 
-    return {"status": "done", "results": results}
+    return {"status": "done", "apns_url": _apns_base_url(), "results": results}
 
 
 @router.get("/debug")
