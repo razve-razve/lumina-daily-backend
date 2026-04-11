@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
-from app.api.v1 import advice, auth, location, profile, settings, timezone, webhooks
+from app.api.v1 import admin, advice, auth, location, profile, settings, timezone, webhooks
 from app.core.batch_job import run_daily_batch
 from app.core.ephemeris import init_ephemeris
 from app.db.session import engine
@@ -47,6 +47,7 @@ app.include_router(location.router, prefix="/api/v1/location", tags=["location"]
 app.include_router(timezone.router, prefix="/api/v1/timezone", tags=["timezone"])
 app.include_router(settings.router, prefix="/api/v1/settings", tags=["settings"])
 app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
+app.include_router(admin.router,    prefix="/api/v1/admin",    tags=["admin"])
 
 
 @app.get("/health", tags=["health"])

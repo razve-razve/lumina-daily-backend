@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # RevenueCat webhook shared secret
     revenuecat_webhook_secret: str = ""
 
+    # Admin
+    admin_secret: str = ""
+
     # Ephemeris
     ephe_path: str = "/app/ephe"
 
