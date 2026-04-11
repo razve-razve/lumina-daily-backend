@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.core.batch_job import run_daily_batch
-from app.db.models import Profile
+from app.db.models import Profile, User
 from app.db.session import AsyncSessionLocal
 from app.services.apns_service import send_daily_notification
 
@@ -45,3 +45,36 @@ async def test_push(x_admin_secret: str = Header(...)):
         results.append({"profile_id": str(p.id), "token_prefix": p.fcm_token[:16], "sent": success})
 
     return {"status": "done", "results": results}
+
+
+@router.get("/debug")
+async def debug(x_admin_secret: str = Header(...)):
+    """Show database state and APNs config for diagnosing notification issues."""
+    _check_secret(x_admin_secret)
+
+    async with AsyncSessionLocal() as db:
+        users_result = await db.execute(select(User))
+        users = list(users_result.scalars().all())
+
+        profiles_result = await db.execute(select(Profile))
+        profiles = list(profiles_result.scalars().all())
+
+    return {
+        "users": [{"id": str(u.id), "email": u.email} for u in users],
+        "profiles": [
+            {
+                "id": str(p.id),
+                "user_id": str(p.user_id),
+                "name": p.name,
+                "fcm_token": p.fcm_token[:20] + "..." if p.fcm_token else None,
+            }
+            for p in profiles
+        ],
+        "apns_config": {
+            "key_id": settings.apns_key_id or "NOT SET",
+            "team_id": settings.apns_team_id or "NOT SET",
+            "bundle_id": settings.apns_bundle_id or "NOT SET",
+            "production": settings.apns_production,
+            "key_set": bool(settings.apns_auth_key),
+        },
+    }
