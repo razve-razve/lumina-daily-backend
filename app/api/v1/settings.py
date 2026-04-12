@@ -65,20 +65,22 @@ async def update_language(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported language. Choose from: {supported}",
         )
-    user = await get_user_by_id(db, str(current_user.id))
+    # Extract before any commit — db.commit() expires ORM objects causing MissingGreenlet
+    user_id = current_user.id
+
+    user = await get_user_by_id(db, str(user_id))
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    old_language = user.language or "en"  # capture before overwriting; default en if not set
+    old_language = user.language or "en"
     user.language = body.language
     db.add(user)
     await db.commit()
 
     # Invalidate ALL today's advice so everything regenerates in the new language.
-    # Single bulk DB delete (one commit) instead of 6 separate ones.
     today = datetime.now(timezone.utc).date()
     for mode in ALL_MODE_NAMES:
-        await delete_cached_advice(str(current_user.id), today.isoformat(), mode, language=old_language)
-    await delete_all_today_advice(db, current_user.id, today)
+        await delete_cached_advice(str(user_id), today.isoformat(), mode, language=old_language)
+    await delete_all_today_advice(db, user_id, today)
 
     return {"language": body.language}
 
