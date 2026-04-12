@@ -69,6 +69,19 @@ async def test_push(x_admin_secret: str = Header(...)):
     return {"status": "done", "apns_url": _apns_base_url(), "results": results}
 
 
+@router.delete("/clear-advice/{user_id}")
+async def clear_advice(user_id: str, x_admin_secret: str = Header(...)):
+    """Delete all today's advice for a user so it regenerates fresh."""
+    _check_secret(x_admin_secret)
+    import uuid
+    from datetime import datetime, timezone
+    from app.db.repositories.advice_repository import delete_all_today_advice
+    today = datetime.now(timezone.utc).date()
+    async with AsyncSessionLocal() as db:
+        await delete_all_today_advice(db, uuid.UUID(user_id), today)
+    return {"status": "cleared", "user_id": user_id, "date": str(today)}
+
+
 @router.get("/debug")
 async def debug(x_admin_secret: str = Header(...)):
     """Show database state and APNs config for diagnosing notification issues."""

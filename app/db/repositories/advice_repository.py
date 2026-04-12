@@ -33,10 +33,20 @@ async def create_advice(db: AsyncSession, advice: DailyAdvice) -> DailyAdvice:
         return advice
     except IntegrityError:
         await db.rollback()
-        # A concurrent request already inserted this record — fetch and return it
+        # Try same language first (concurrent request race)
         existing = await get_advice(db, advice.user_id, advice.date, advice.mode, language=advice.language)
         if existing:
             return existing
+        # Language mismatch — old row exists in a different language (e.g. user switched language).
+        # Delete the stale row and re-insert in the new language.
+        stale = await get_advice(db, advice.user_id, advice.date, advice.mode)
+        if stale:
+            await db.delete(stale)
+            await db.commit()
+            db.add(advice)
+            await db.commit()
+            await db.refresh(advice)
+            return advice
         raise
 
 
