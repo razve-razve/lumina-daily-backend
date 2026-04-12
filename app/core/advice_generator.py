@@ -200,14 +200,17 @@ async def generate_transit_explanation(
         if language == "ru" else ""
     )
     system = (
-        f"You are a concise astrologer. Write exactly 2 sentences explaining how a specific "
-        f"planetary transit personally affects this person today, based on their natal chart. "
+        f"You are a concise astrologer writing directly to the person — always use second person "
+        f"(you/your), never third person (he/she/they/their name). "
+        f"Write exactly 2 sentences explaining how a specific planetary transit affects the reader "
+        f"today, based on their natal chart. "
         f"Write in {lang}. Be specific, warm, and practical. No degree numbers. No jargon.{russian_note}"
     )
     user_msg = (
-        f"Person: {name}, Sun in {sun_sign}, Moon in {moon_sign}.\n"
+        f"Sun in {sun_sign}, Moon in {moon_sign}.\n"
         f"Transit: {transit_tag}\n\n"
-        f"In 2 sentences, explain specifically how this transit affects {name} today."
+        f"In 2 sentences, address the reader directly (you/your) and explain how this transit "
+        f"affects them today."
     )
     response = await client.chat.completions.create(
         model="gpt-4o-mini",
