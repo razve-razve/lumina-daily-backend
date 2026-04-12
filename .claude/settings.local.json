@@ -64,7 +64,13 @@
       "Bash(npm install:*)",
       "Bash(curl -fsSL https://railway.app/install.sh)",
       "Bash(sh)",
-      "Bash(RAILWAY_INSTALL_DIR=\"$HOME/.local/bin\" sh)"
+      "Bash(RAILWAY_INSTALL_DIR=\"$HOME/.local/bin\" sh)",
+      "Bash(xcodebuild -scheme \"Lumina Daily\" -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" -quiet build)",
+      "Bash(xcodebuild -scheme \"Lumina Daily\" -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" build)",
+      "Bash(find ~/Desktop -maxdepth 2 -name Simulator*)",
+      "Read(//Users/Arseniy/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/194974cb-39b5-4935-bb4f-98eea30b5e2f/bc830516-d68d-4bae-9c4d-5d66c8ad6a86/skills/docx/**)",
+      "Bash(pandoc \"/Users/Arseniy/Desktop/lumina daily/Feedback 120426.docx\" -t plain)",
+      "Bash(python3 -c ':*)"
     ]
   }
 }

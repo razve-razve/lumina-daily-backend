@@ -37,6 +37,16 @@ async def delete_cached_advice(user_id: str, date: str, mode: str, language: str
     await r.delete(_advice_key(user_id, date, mode, language))
 
 
+async def redis_get(key: str) -> str | None:
+    r = get_redis()
+    return await r.get(key)
+
+
+async def redis_setex(key: str, ttl: int, value: str) -> None:
+    r = get_redis()
+    await r.setex(key, ttl, value)
+
+
 async def close_redis() -> None:
     global _redis
     if _redis:

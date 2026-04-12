@@ -3,9 +3,10 @@ import asyncio
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.advice_generator import generate_all_advice
+from app.core.advice_generator import generate_all_advice, generate_transit_explanation
 from app.core.ephemeris import (
     calculate_current_transits,
     calculate_transit_aspects_to_natal,
@@ -18,7 +19,7 @@ from app.db.repositories.advice_repository import create_advice, get_advice
 from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.dependencies import get_current_user, get_db
 from app.schemas.advice import CategoryCard, DailyAdviceResponse
-from app.services.redis_service import cache_advice, get_cached_advice
+from app.services.redis_service import cache_advice, get_cached_advice, redis_get, redis_setex
 
 router = APIRouter()
 
@@ -155,3 +156,43 @@ async def get_advice_for_date(
     # Past date — generate on demand
     advice = await _generate_and_store(profile, user_id, lang, target_date, db)
     return _to_response(advice)
+
+
+class TransitExplanationRequest(BaseModel):
+    transit_tag: str
+
+
+@router.post("/transit-explanation")
+async def get_transit_explanation(
+    body: TransitExplanationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a short personalized explanation for a transit tag (cached 24h)."""
+    user_id = current_user.id
+    lang = current_user.language or "en"
+    tag = body.transit_tag.strip()
+
+    cache_key = f"transit_exp:{user_id}:{tag}:{lang}"
+    cached = await redis_get(cache_key)
+    if cached:
+        return {"explanation": cached}
+
+    profile = await get_profile_by_user_id(db, user_id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+
+    planets = profile.natal_chart_json.get("planets", {})
+    sun_sign = planets.get("Sun", {}).get("sign", "unknown")
+    moon_sign = planets.get("Moon", {}).get("sign", "unknown")
+
+    explanation = await generate_transit_explanation(
+        transit_tag=tag,
+        name=profile.name,
+        sun_sign=sun_sign,
+        moon_sign=moon_sign,
+        language=lang,
+    )
+
+    await redis_setex(cache_key, 86400, explanation)
+    return {"explanation": explanation}

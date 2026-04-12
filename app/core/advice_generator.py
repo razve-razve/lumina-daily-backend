@@ -184,6 +184,43 @@ async def generate_theme(
     return response.choices[0].message.content.strip()
 
 
+async def generate_transit_explanation(
+    *,
+    transit_tag: str,
+    name: str,
+    sun_sign: str,
+    moon_sign: str,
+    language: str,
+) -> str:
+    """Generate a personalized 2-sentence explanation for a specific transit tag."""
+    client = get_openai_client()
+    lang = _language_name(language)
+    russian_note = (
+        " Use formal ВЫ (вы/вас/вам). Apply correct Russian grammatical gender to all planet names."
+        if language == "ru" else ""
+    )
+    system = (
+        f"You are a concise astrologer. Write exactly 2 sentences explaining how a specific "
+        f"planetary transit personally affects this person today, based on their natal chart. "
+        f"Write in {lang}. Be specific, warm, and practical. No degree numbers. No jargon.{russian_note}"
+    )
+    user_msg = (
+        f"Person: {name}, Sun in {sun_sign}, Moon in {moon_sign}.\n"
+        f"Transit: {transit_tag}\n\n"
+        f"In 2 sentences, explain specifically how this transit affects {name} today."
+    )
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.8,
+        max_tokens=150,
+    )
+    return response.choices[0].message.content.strip()
+
+
 async def generate_all_advice(
     *,
     name: str,

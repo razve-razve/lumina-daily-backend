@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from app.api.v1 import admin, advice, auth, location, profile, settings, timezone, webhooks
-from app.core.batch_job import run_daily_batch
+from app.core.batch_job import run_daily_batch, run_notification_job
 from app.core.ephemeris import init_ephemeris
 from app.db.session import engine
 from app.services.redis_service import close_redis
@@ -21,8 +21,9 @@ async def lifespan(app: FastAPI):
     # Startup
     init_ephemeris()
     scheduler.add_job(run_daily_batch, "cron", hour=2, minute=0, id="daily_batch")
+    scheduler.add_job(run_notification_job, "cron", minute=0, id="hourly_notifications")
     scheduler.start()
-    logger.info("Scheduler started — daily batch runs at 02:00 UTC")
+    logger.info("Scheduler started — advice batch at 02:00 UTC, push notifications hourly")
 
     yield
 

@@ -1,10 +1,14 @@
 """
 Daily batch job — runs at 02:00 UTC via APScheduler.
-Generates advice for all active users and sends push notifications.
+Generates advice for all active users.
+
+Hourly notification job — runs at :00 every hour.
+Sends push notifications to users whose notification_time (stored in UTC) matches
+the current UTC hour. Default time: 08:00 UTC for users with no preference set.
 """
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as time_type, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +30,8 @@ from app.services.redis_service import cache_advice, get_cached_advice
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_NOTIFICATION_HOUR = 8  # 08:00 UTC when user has no preference
+
 
 async def _process_user(
     user_id,
@@ -35,6 +41,7 @@ async def _process_user(
     today: date,
     db: AsyncSession,
 ) -> None:
+    """Generate (but do not push) advice for a user. Push is handled by run_notification_job."""
     profile = await get_profile_by_user_id(db, user_id)
     if not profile:
         return
@@ -45,17 +52,12 @@ async def _process_user(
     cached = await get_cached_advice(str(user_id), today.isoformat(), mode)
     if cached:
         logger.info(f"Cache hit for user {user_id} — skipping generation")
-        if profile.fcm_token:
-            theme = cached.get("advice", {}).get("theme", "") if isinstance(cached, dict) else ""
-            await send_daily_notification(profile.fcm_token, language, theme=theme)
         return
 
     # Check DB cache
     existing = await get_advice(db, user_id, today, mode)
     if existing:
         await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
-        if profile.fcm_token:
-            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
         return
 
     natal_chart = profile.natal_chart_json
@@ -102,12 +104,8 @@ async def _process_user(
         risk_text=texts["risk_text"],
     )
 
-    saved = await create_advice(db, advice)
+    await create_advice(db, advice)
     await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
-
-    if profile.fcm_token:
-        await send_daily_notification(profile.fcm_token, language, theme=saved.theme)
-
     logger.info(f"Generated advice for user {user_id}")
 
 
@@ -138,3 +136,44 @@ async def run_daily_batch() -> None:
                     logger.error(f"Error processing user {batch[j].id}: {result}")
 
     logger.info("Daily batch job completed")
+
+
+async def run_notification_job() -> None:
+    """
+    Runs at the top of every hour (UTC).
+    Sends push notifications to users whose notification_time matches the current UTC hour.
+    Users with no notification_time preference receive notifications at 08:00 UTC.
+    """
+    now_utc = datetime.now(timezone.utc)
+    current_hour = now_utc.hour
+    today = now_utc.date()
+    logger.info(f"Notification job started for hour {current_hour:02d}:00 UTC")
+
+    async with AsyncSessionLocal() as db:
+        users = await get_all_active_users(db)
+        sent = 0
+        for user in users:
+            profile = await get_profile_by_user_id(db, user.id)
+            if not profile or not profile.fcm_token:
+                continue
+
+            # Determine this user's preferred notification hour (UTC)
+            if profile.notification_time is not None:
+                target_hour = profile.notification_time.hour
+            else:
+                target_hour = _DEFAULT_NOTIFICATION_HOUR
+
+            if target_hour != current_hour:
+                continue
+
+            # Find today's advice for this user
+            existing = await get_advice(db, user.id, today, profile.interpretation_mode)
+            if not existing:
+                logger.info(f"No advice for user {user.id} — skipping push")
+                continue
+
+            language = user.language or "en"
+            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
+            sent += 1
+
+    logger.info(f"Notification job completed — sent {sent} push notifications")
