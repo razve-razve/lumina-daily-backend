@@ -46,7 +46,8 @@ async def _process_user(
     if cached:
         logger.info(f"Cache hit for user {user_id} — skipping generation")
         if profile.fcm_token:
-            await send_daily_notification(profile.fcm_token, language)
+            theme = cached.get("advice", {}).get("theme", "") if isinstance(cached, dict) else ""
+            await send_daily_notification(profile.fcm_token, language, theme=theme)
         return
 
     # Check DB cache
@@ -54,7 +55,7 @@ async def _process_user(
     if existing:
         await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
         if profile.fcm_token:
-            await send_daily_notification(profile.fcm_token, language)
+            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
         return
 
     natal_chart = profile.natal_chart_json
@@ -101,11 +102,11 @@ async def _process_user(
         risk_text=texts["risk_text"],
     )
 
-    await create_advice(db, advice)
+    saved = await create_advice(db, advice)
     await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
 
     if profile.fcm_token:
-        await send_daily_notification(profile.fcm_token, language)
+        await send_daily_notification(profile.fcm_token, language, theme=saved.theme)
 
     logger.info(f"Generated advice for user {user_id}")
 

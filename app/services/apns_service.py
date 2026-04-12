@@ -62,8 +62,8 @@ def _make_jwt() -> str:
     return token
 
 
-async def send_daily_notification(device_token: str, language: str) -> bool:
-    """Send 'your guidance is ready' push notification via APNs. Returns True on success."""
+async def send_daily_notification(device_token: str, language: str, theme: str = "") -> bool:
+    """Send daily push notification via APNs. Returns True on success."""
     if not device_token:
         return False
 
@@ -72,11 +72,15 @@ async def send_daily_notification(device_token: str, language: str) -> bool:
         logger.warning("APNS_BUNDLE_ID not set — skipping push")
         return False
 
-    messages = {
-        "en": ("Your daily guidance is ready ✨", "Open Lumina Daily to read your stars."),
-        "ru": ("Ваш ежедневный прогноз готов ✨", "Откройте Lumina Daily, чтобы узнать, что говорят звёзды."),
-    }
-    title, body = messages.get(language, messages["en"])
+    if theme:
+        title = "Lumina Daily ✨"
+        body = theme[:160] + ("…" if len(theme) > 160 else "")
+    else:
+        fallback = {
+            "en": ("Your daily guidance is ready ✨", "Open Lumina Daily to read your stars."),
+            "ru": ("Ваш ежедневный прогноз готов ✨", "Откройте Lumina Daily, чтобы узнать, что говорят звёзды."),
+        }
+        title, body = fallback.get(language, fallback["en"])
 
     try:
         jwt_token = _make_jwt()
