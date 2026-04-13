@@ -52,12 +52,17 @@ async def _process_user(
     cached = await get_cached_advice(str(user_id), today.isoformat(), mode)
     if cached:
         logger.info(f"Cache hit for user {user_id} — skipping generation")
+        if not profile.notification_time and profile.fcm_token:
+            theme = cached.get("advice", {}).get("theme", "") if isinstance(cached, dict) else ""
+            await send_daily_notification(profile.fcm_token, language, theme=theme)
         return
 
     # Check DB cache
     existing = await get_advice(db, user_id, today, mode)
     if existing:
         await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
+        if not profile.notification_time and profile.fcm_token:
+            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
         return
 
     natal_chart = profile.natal_chart_json
@@ -108,6 +113,12 @@ async def _process_user(
     await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
     logger.info(f"Generated advice for user {user_id}")
 
+    # Send push immediately for users with no custom notification_time preference.
+    # Users who set an explicit time are handled by run_notification_job().
+    if not profile.notification_time and profile.fcm_token:
+        language = language  # already in scope
+        await send_daily_notification(profile.fcm_token, language, theme=advice.theme)
+
 
 async def run_daily_batch() -> None:
     """Entry point called by APScheduler at 02:00 UTC."""
@@ -157,12 +168,11 @@ async def run_notification_job() -> None:
             if not profile or not profile.fcm_token:
                 continue
 
-            # Determine this user's preferred notification hour (UTC)
-            if profile.notification_time is not None:
-                target_hour = profile.notification_time.hour
-            else:
-                target_hour = _DEFAULT_NOTIFICATION_HOUR
+            # Only handle users who explicitly set a time — NULL users are covered by run_daily_batch()
+            if profile.notification_time is None:
+                continue
 
+            target_hour = profile.notification_time.hour
             if target_hour != current_hour:
                 continue
 
