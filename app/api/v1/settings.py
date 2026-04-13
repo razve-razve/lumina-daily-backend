@@ -128,6 +128,9 @@ async def update_notifications(
         h, m = map(int, body.notification_time.split(":"))
         profile.notification_time = time(h, m)
 
+    if body.timezone is not None:
+        profile.device_timezone = body.timezone
+
     await update_profile(db, profile)
     return {"notifications_updated": True}
 

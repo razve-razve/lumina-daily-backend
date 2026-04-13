@@ -9,6 +9,7 @@ the current UTC hour. Default time: 08:00 UTC for users with no preference set.
 import asyncio
 import logging
 from datetime import date, datetime, time as time_type, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +31,20 @@ from app.services.redis_service import cache_advice, get_cached_advice
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_NOTIFICATION_HOUR = 8  # 08:00 UTC when user has no preference
+_DEFAULT_LOCAL_HOUR = 8  # 08:00 in the user's own timezone
+
+
+def _local_hour_to_utc_hour(local_hour: int, tz_id: str | None, today: date) -> int:
+    """Convert a local notification hour to UTC hour for the given date.
+    Falls back to treating the hour as UTC if timezone is unknown."""
+    if not tz_id:
+        return local_hour
+    try:
+        tz = ZoneInfo(tz_id)
+        local_dt = datetime(today.year, today.month, today.day, local_hour, 0, tzinfo=tz)
+        return local_dt.astimezone(timezone.utc).hour
+    except (ZoneInfoNotFoundError, Exception):
+        return local_hour
 
 
 async def _process_user(
@@ -52,17 +66,12 @@ async def _process_user(
     cached = await get_cached_advice(str(user_id), today.isoformat(), mode)
     if cached:
         logger.info(f"Cache hit for user {user_id} — skipping generation")
-        if not profile.notification_time and profile.fcm_token:
-            theme = cached.get("advice", {}).get("theme", "") if isinstance(cached, dict) else ""
-            await send_daily_notification(profile.fcm_token, language, theme=theme)
         return
 
     # Check DB cache
     existing = await get_advice(db, user_id, today, mode)
     if existing:
         await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
-        if not profile.notification_time and profile.fcm_token:
-            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
         return
 
     natal_chart = profile.natal_chart_json
@@ -113,12 +122,6 @@ async def _process_user(
     await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
     logger.info(f"Generated advice for user {user_id}")
 
-    # Send push immediately for users with no custom notification_time preference.
-    # Users who set an explicit time are handled by run_notification_job().
-    if not profile.notification_time and profile.fcm_token:
-        language = language  # already in scope
-        await send_daily_notification(profile.fcm_token, language, theme=advice.theme)
-
 
 async def run_daily_batch() -> None:
     """Entry point called by APScheduler at 02:00 UTC."""
@@ -152,8 +155,10 @@ async def run_daily_batch() -> None:
 async def run_notification_job() -> None:
     """
     Runs at the top of every hour (UTC).
-    Sends push notifications to users whose notification_time matches the current UTC hour.
-    Users with no notification_time preference receive notifications at 08:00 UTC.
+    Sends push notifications to users whose preferred local notification hour
+    corresponds to the current UTC hour.
+    - Users with explicit notification_time: use that local hour
+    - Users with no preference: default to 08:00 in their device timezone
     """
     now_utc = datetime.now(timezone.utc)
     current_hour = now_utc.hour
@@ -168,12 +173,14 @@ async def run_notification_job() -> None:
             if not profile or not profile.fcm_token:
                 continue
 
-            # Only handle users who explicitly set a time — NULL users are covered by run_daily_batch()
-            if profile.notification_time is None:
-                continue
+            # Determine desired local hour (explicit preference or default 08:00)
+            local_hour = profile.notification_time.hour if profile.notification_time else _DEFAULT_LOCAL_HOUR
+            tz_id = profile.device_timezone  # may be None for old users
 
-            target_hour = profile.notification_time.hour
-            if target_hour != current_hour:
+            # Convert local hour → UTC hour using device timezone
+            target_utc_hour = _local_hour_to_utc_hour(local_hour, tz_id, today)
+
+            if target_utc_hour != current_hour:
                 continue
 
             # Find today's advice for this user
@@ -185,5 +192,6 @@ async def run_notification_job() -> None:
             language = user.language or "en"
             await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
             sent += 1
+            logger.info(f"Sent push to user {user.id} (local {local_hour:02d}:00 → UTC {target_utc_hour:02d}:00)")
 
     logger.info(f"Notification job completed — sent {sent} push notifications")

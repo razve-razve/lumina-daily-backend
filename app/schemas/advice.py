@@ -32,5 +32,6 @@ class SettingsModeRequest(BaseModel):
 
 class SettingsNotificationsRequest(BaseModel):
     fcm_token: Optional[str] = None
-    notification_time: Optional[str] = None  # "HH:MM"
+    notification_time: Optional[str] = None  # "HH:MM" in user's local timezone
+    timezone: Optional[str] = None           # IANA timezone, e.g. "Europe/Moscow"
     enabled: bool = True

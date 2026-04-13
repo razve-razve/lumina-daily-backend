@@ -64,6 +64,7 @@ class Profile(Base):
 
     interpretation_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="Practical Daily")
     notification_time: Mapped[Optional[time_type]] = mapped_column(Time, nullable=True)
+    device_timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     fcm_token: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
 
