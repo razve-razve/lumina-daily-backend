@@ -114,6 +114,10 @@ async def update_profile_endpoint(
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
+    # Capture old values before mutation (needed for advice invalidation check)
+    old_name = profile.name
+    old_gender = profile.gender
+
     if body.name is not None:
         profile.name = body.name
     if body.gender is not None:
@@ -161,8 +165,8 @@ async def update_profile_endpoint(
         )
 
     advice_affecting_change = any([
-        body.name is not None and body.name != profile.name,
-        body.gender is not None and body.gender != profile.gender,
+        body.name is not None and body.name != old_name,
+        body.gender is not None and body.gender != old_gender,
         body.date_of_birth is not None,
         body.time_of_birth is not None,
         body.latitude is not None,
