@@ -1,6 +1,8 @@
 from __future__ import annotations
 import asyncio
 from datetime import date, datetime, timezone
+from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -22,6 +24,17 @@ from app.schemas.advice import CategoryCard, DailyAdviceResponse
 from app.services.redis_service import cache_advice, get_cached_advice, redis_get, redis_setex
 
 router = APIRouter()
+
+
+def _user_local_date(device_timezone: str | None) -> date:
+    """Return the current calendar date in the user's local timezone (UTC fallback)."""
+    if not device_timezone:
+        return datetime.now(timezone.utc).date()
+    try:
+        tz = ZoneInfo(device_timezone)
+        return datetime.now(tz).date()
+    except (ZoneInfoNotFoundError, Exception):
+        return datetime.now(timezone.utc).date()
 
 
 def _to_response(advice: DailyAdvice) -> DailyAdviceResponse:
@@ -97,10 +110,15 @@ async def _generate_and_store(
 
 @router.get("/today", response_model=DailyAdviceResponse)
 async def get_today_advice(
+    client_date: Optional[date] = Query(
+        None,
+        description="The client's local calendar date (YYYY-MM-DD). "
+                    "When provided this is used as 'today'; otherwise the server "
+                    "derives it from the user's stored device_timezone.",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    today = datetime.now(timezone.utc).date()
     # Extract plain Python values immediately — db.commit() inside create_advice
     # expires all ORM objects in the session, making later attribute access fail
     # with MissingGreenlet in an async context.
@@ -110,6 +128,12 @@ async def get_today_advice(
     profile = await get_profile_by_user_id(db, user_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found. Complete onboarding first.")
+
+    # Determine "today" using (in priority order):
+    # 1. client_date — device knows its own date with certainty
+    # 2. profile.device_timezone — server-side conversion (slightly stale if user travelled)
+    # 3. UTC date — safe fallback
+    today = client_date or _user_local_date(profile.device_timezone)
 
     mode = profile.interpretation_mode
 

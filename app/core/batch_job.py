@@ -1,10 +1,12 @@
 """
-Daily batch job — runs at 02:00 UTC via APScheduler.
-Generates advice for all active users.
+Advice generation job — runs every hour.
+Checks each user's LOCAL date (using device_timezone) and generates advice
+for that date if it doesn't exist yet. This ensures users in any timezone
+always have fresh advice ready when their local day starts.
 
-Hourly notification job — runs at :00 every hour.
-Sends push notifications to users whose notification_time (stored in UTC) matches
-the current UTC hour. Default time: 08:00 UTC for users with no preference set.
+Notification job — runs every hour.
+Compares the user's current LOCAL hour against their preferred notification hour.
+Sends a push only when they match, using the advice keyed to their local date.
 """
 import asyncio
 import logging
@@ -27,66 +29,77 @@ from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.db.repositories.user_repository import get_all_active_users
 from app.db.session import AsyncSessionLocal
 from app.services.apns_service import send_daily_notification
-from app.services.redis_service import cache_advice, get_cached_advice
+from app.services.redis_service import cache_advice, get_cached_advice, redis_setnx
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCAL_HOUR = 8  # 08:00 in the user's own timezone
 
 
-def _local_hour_to_utc_hour(local_hour: int, tz_id: str | None, today: date) -> int:
-    """Convert a local notification hour to UTC hour for the given date.
-    Falls back to treating the hour as UTC if timezone is unknown."""
-    if not tz_id:
-        return local_hour
-    try:
-        tz = ZoneInfo(tz_id)
-        local_dt = datetime(today.year, today.month, today.day, local_hour, 0, tzinfo=tz)
-        return local_dt.astimezone(timezone.utc).hour
-    except (ZoneInfoNotFoundError, Exception):
-        return local_hour
+# ---------------------------------------------------------------------------
+# Timezone helpers
+# ---------------------------------------------------------------------------
 
+def _user_local_date(device_timezone: str | None) -> date:
+    """Return the current calendar date in the user's local timezone.
+    Falls back to UTC if the timezone is unknown or invalid."""
+    if not device_timezone:
+        return datetime.now(timezone.utc).date()
+    try:
+        tz = ZoneInfo(device_timezone)
+        return datetime.now(tz).date()
+    except (ZoneInfoNotFoundError, Exception):
+        return datetime.now(timezone.utc).date()
+
+
+def _user_local_hour(device_timezone: str | None) -> int:
+    """Return the current hour (0–23) in the user's local timezone."""
+    if not device_timezone:
+        return datetime.now(timezone.utc).hour
+    try:
+        tz = ZoneInfo(device_timezone)
+        return datetime.now(tz).hour
+    except (ZoneInfoNotFoundError, Exception):
+        return datetime.now(timezone.utc).hour
+
+
+# ---------------------------------------------------------------------------
+# Per-user advice generation
+# ---------------------------------------------------------------------------
 
 async def _process_user(
+    profile,
     user_id,
     language: str,
     transits: dict,
-    transit_aspects_cache: dict,  # keyed by natal planet combo — not used, computed per user
-    today: date,
+    target_date: date,
     db: AsyncSession,
 ) -> None:
-    """Generate (but do not push) advice for a user. Push is handled by run_notification_job."""
-    profile = await get_profile_by_user_id(db, user_id)
-    if not profile:
-        return
-
+    """Generate advice for a user for target_date (their local today).
+    No-ops if advice already exists in cache or DB."""
     mode = profile.interpretation_mode
 
-    # Check Redis cache first
-    cached = await get_cached_advice(str(user_id), today.isoformat(), mode)
+    # Redis cache check (cheap)
+    cached = await get_cached_advice(str(user_id), target_date.isoformat(), mode, language=language)
     if cached:
-        logger.info(f"Cache hit for user {user_id} — skipping generation")
         return
 
-    # Check DB cache
-    existing = await get_advice(db, user_id, today, mode)
+    # DB check
+    existing = await get_advice(db, user_id, target_date, mode, language=language)
     if existing:
-        await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
+        await cache_advice(str(user_id), target_date.isoformat(), mode, {"cached": True}, language=language)
         return
 
     natal_chart = profile.natal_chart_json
     natal_planets = natal_chart.get("planets", {})
 
-    # Compute this user's transit aspects (personal — depends on natal chart)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
         None, calculate_transit_aspects_to_natal, transits, natal_planets
     )
-
     scores = score_categories(transit_aspects)
     moon_phase = get_moon_phase(transits)
     transit_tags = build_transit_tags(transit_aspects, transits)
 
-    # Generate AI text
     texts = await generate_all_advice(
         name=profile.name,
         gender=profile.gender,
@@ -99,7 +112,7 @@ async def _process_user(
 
     advice = DailyAdvice(
         user_id=user_id,
-        date=today,
+        date=target_date,
         mode=mode,
         language=language,
         theme=texts["theme"],
@@ -119,79 +132,125 @@ async def _process_user(
     )
 
     await create_advice(db, advice)
-    await cache_advice(str(user_id), today.isoformat(), mode, {"cached": True})
-    logger.info(f"Generated advice for user {user_id}")
+    await cache_advice(str(user_id), target_date.isoformat(), mode, {"cached": True}, language=language)
+    logger.info(f"Generated advice for user {user_id} — local date {target_date} ({profile.device_timezone or 'UTC'})")
 
 
-async def run_daily_batch() -> None:
-    """Entry point called by APScheduler at 02:00 UTC."""
-    today = datetime.now(timezone.utc).date()
-    logger.info(f"Daily batch job started for {today}")
+# ---------------------------------------------------------------------------
+# Hourly advice generation job
+# ---------------------------------------------------------------------------
 
-    # Calculate today's planetary positions once — shared across all users
+async def run_advice_job() -> None:
+    """
+    Runs every hour. For each user, determines their current local date
+    and generates today's advice if it doesn't exist yet.
+    Processes users in batches of 5 to respect OpenAI rate limits.
+    """
+    logger.info("Advice job started")
+
+    # Compute shared planetary positions once (good enough for hourly precision)
     jd_now = await asyncio.get_event_loop().run_in_executor(None, now_julian_day)
     transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_now)
 
     async with AsyncSessionLocal() as db:
         users = await get_all_active_users(db)
-        logger.info(f"Processing {len(users)} users")
+        logger.info(f"Advice job: {len(users)} users to check")
 
-        # Process in batches of 10 to avoid overwhelming OpenAI rate limits
-        batch_size = 10
+        batch_size = 5
         for i in range(0, len(users), batch_size):
             batch = users[i:i + batch_size]
-            tasks = [
-                _process_user(u.id, u.language or "en", transits, {}, today, db)
-                for u in batch
-            ]
+            tasks = []
+            for u in batch:
+                profile = await get_profile_by_user_id(db, u.id)
+                if not profile:
+                    continue
+                user_today = _user_local_date(profile.device_timezone)
+                tasks.append(
+                    _process_user(profile, u.id, u.language or "en", transits, user_today, db)
+                )
+
+            if not tasks:
+                continue
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for j, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(f"Error processing user {batch[j].id}: {result}")
+                    logger.error(f"Advice job error for user {batch[j].id}: {result}")
 
-    logger.info("Daily batch job completed")
+    logger.info("Advice job completed")
 
+
+# ---------------------------------------------------------------------------
+# Hourly notification job
+# ---------------------------------------------------------------------------
 
 async def run_notification_job() -> None:
     """
-    Runs at the top of every hour (UTC).
-    Sends push notifications to users whose preferred local notification hour
-    corresponds to the current UTC hour.
-    - Users with explicit notification_time: use that local hour
-    - Users with no preference: default to 08:00 in their device timezone
+    Runs every hour.
+    Sends a push notification to each user whose current LOCAL hour matches
+    their chosen notification hour (default 08:00 local).
+    Uses advice keyed to the user's LOCAL date so users in any timezone
+    always receive the correct day's content.
+
+    Duplicate-send protection: before sending, we atomically claim a Redis key
+    `notif_sent:{user_id}:{local_date}:{desired_hour}` (TTL 2 h).  If two
+    Railway instances fire at the same second during a deploy, only the one that
+    wins the SET NX will actually send — the other sees the key already exists
+    and skips.  This guarantees exactly-once delivery per user per day.
     """
-    now_utc = datetime.now(timezone.utc)
-    current_hour = now_utc.hour
-    today = now_utc.date()
-    logger.info(f"Notification job started for hour {current_hour:02d}:00 UTC")
+    logger.info("Notification job started")
 
     async with AsyncSessionLocal() as db:
         users = await get_all_active_users(db)
         sent = 0
+
         for user in users:
             profile = await get_profile_by_user_id(db, user.id)
             if not profile or not profile.fcm_token:
                 continue
 
-            # Determine desired local hour (explicit preference or default 08:00)
-            local_hour = profile.notification_time.hour if profile.notification_time else _DEFAULT_LOCAL_HOUR
-            tz_id = profile.device_timezone  # may be None for old users
+            tz_id = profile.device_timezone
 
-            # Convert local hour → UTC hour using device timezone
-            target_utc_hour = _local_hour_to_utc_hour(local_hour, tz_id, today)
+            # User's current local hour
+            current_local_hour = _user_local_hour(tz_id)
 
-            if target_utc_hour != current_hour:
+            # notification_time stores the user's DESIRED LOCAL hour (e.g. 8 for 8 am).
+            # Compare directly with current local hour — no UTC conversion needed.
+            desired_hour = (
+                profile.notification_time.hour
+                if profile.notification_time
+                else _DEFAULT_LOCAL_HOUR
+            )
+
+            if current_local_hour != desired_hour:
                 continue
 
-            # Find today's advice for this user
-            existing = await get_advice(db, user.id, today, profile.interpretation_mode)
+            # --- Duplicate-send guard (atomic Redis lock) ---
+            user_today = _user_local_date(tz_id)
+            lock_key = f"notif_sent:{user.id}:{user_today.isoformat()}:{desired_hour}"
+            claimed = await redis_setnx(lock_key, ttl=7200, value="1")  # 2-hour TTL
+            if not claimed:
+                # Another instance already sent this notification — skip.
+                logger.info(f"Skipping duplicate push for user {user.id} (lock already held)")
+                continue
+
+            # Look up advice for the user's LOCAL today
+            existing = await get_advice(db, user.id, user_today, profile.interpretation_mode)
             if not existing:
-                logger.info(f"No advice for user {user.id} — skipping push")
+                logger.info(
+                    f"No advice for user {user.id} on local date {user_today} — skipping push"
+                )
                 continue
 
             language = user.language or "en"
-            await send_daily_notification(profile.fcm_token, language, theme=existing.theme)
-            sent += 1
-            logger.info(f"Sent push to user {user.id} (local {local_hour:02d}:00 → UTC {target_utc_hour:02d}:00)")
+            success = await send_daily_notification(
+                profile.fcm_token, language, theme=existing.theme
+            )
+            if success:
+                sent += 1
+                logger.info(
+                    f"Push sent → user {user.id} | local {desired_hour:02d}:00 "
+                    f"({tz_id or 'UTC'}) | date {user_today}"
+                )
 
-    logger.info(f"Notification job completed — sent {sent} push notifications")
+    logger.info(f"Notification job done — {sent} notifications sent")

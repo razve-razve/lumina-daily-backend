@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from app.api.v1 import admin, advice, auth, location, profile, settings, timezone, webhooks
-from app.core.batch_job import run_daily_batch, run_notification_job
+from app.core.batch_job import run_advice_job, run_notification_job
 from app.core.ephemeris import init_ephemeris
 from app.db.session import engine
 from app.services.redis_service import close_redis
@@ -20,10 +20,14 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 async def lifespan(app: FastAPI):
     # Startup
     init_ephemeris()
-    scheduler.add_job(run_daily_batch, "cron", hour=2, minute=0, id="daily_batch")
+    # Advice generation — runs every hour, generates advice for each user's LOCAL today.
+    # Processes users whose timezone just started a new day, so advice is always ready.
+    scheduler.add_job(run_advice_job, "cron", minute=0, id="hourly_advice")
+    # Notification delivery — runs every hour, fires push when user's local hour matches
+    # their preference.  Uses a Redis lock to prevent duplicate sends across instances.
     scheduler.add_job(run_notification_job, "cron", minute=0, id="hourly_notifications")
     scheduler.start()
-    logger.info("Scheduler started — advice batch at 02:00 UTC, push notifications hourly")
+    logger.info("Scheduler started — advice generation + notifications every hour")
 
     yield
 

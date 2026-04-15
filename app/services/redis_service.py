@@ -47,6 +47,14 @@ async def redis_setex(key: str, ttl: int, value: str) -> None:
     await r.setex(key, ttl, value)
 
 
+async def redis_setnx(key: str, ttl: int, value: str) -> bool:
+    """Atomically set key=value only if it doesn't exist yet.
+    Returns True if the key was set (this caller "won"), False if it already existed.
+    Used as a distributed lock to prevent duplicate work across server instances."""
+    r = get_redis()
+    return await r.set(key, value, nx=True, ex=ttl) is not None
+
+
 async def close_redis() -> None:
     global _redis
     if _redis:
