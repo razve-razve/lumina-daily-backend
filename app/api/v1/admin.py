@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException
 from sqlalchemy import select
 
 from app.config import settings
-from app.core.batch_job import run_daily_batch
+from app.core.batch_job import run_advice_job
 from app.db.models import Profile, User
 from app.db.session import AsyncSessionLocal
 from app.services.apns_service import send_daily_notification
@@ -23,7 +23,7 @@ def _check_secret(secret: str):
 async def trigger_batch(x_admin_secret: str = Header(...)):
     """Manually trigger the daily batch job. Protected by admin secret."""
     _check_secret(x_admin_secret)
-    asyncio.create_task(run_daily_batch())
+    asyncio.create_task(run_advice_job())
     return {"status": "batch job started"}
 
 

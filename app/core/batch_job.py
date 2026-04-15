@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Advice generation job — runs every hour.
 Checks each user's LOCAL date (using device_timezone) and generates advice
