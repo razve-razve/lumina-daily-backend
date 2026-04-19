@@ -71,7 +71,8 @@ async def revenuecat_webhook(
 
     try:
         user = await get_user_by_id(db, app_user_id)
-    except Exception:
+    except (ValueError, TypeError):
+        # UUID parsing error — malformed app_user_id from RevenueCat
         logger.warning(f"Invalid app_user_id format: {app_user_id}")
         return {"received": True}
 

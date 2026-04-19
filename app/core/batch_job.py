@@ -236,14 +236,13 @@ async def run_notification_job() -> None:
                 continue
 
             # Look up advice for the user's LOCAL today
-            existing = await get_advice(db, user.id, user_today, profile.interpretation_mode)
+            language = user.language or "en"
+            existing = await get_advice(db, user.id, user_today, profile.interpretation_mode, language=language)
             if not existing:
                 logger.info(
                     f"No advice for user {user.id} on local date {user_today} — skipping push"
                 )
                 continue
-
-            language = user.language or "en"
             success = await send_daily_notification(
                 profile.fcm_token, language, theme=existing.theme
             )

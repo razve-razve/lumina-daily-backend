@@ -17,11 +17,6 @@ from app.services.redis_service import delete_cached_advice
 router = APIRouter()
 
 
-class SubscriptionRequest(BaseModel):
-    transaction_id: str
-    product_id: str
-
-
 class LanguageRequest(BaseModel):
     language: str   # "en" | "ru"
 
@@ -37,20 +32,11 @@ async def get_me(
     }
 
 
-@router.post("/subscription")
-async def update_subscription(
-    body: SubscriptionRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    user = await get_user_by_id(db, str(current_user.id))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    user.subscription_status = "pro"
-    db.add(user)
-    await db.commit()
-    return {"subscription_status": "pro"}
+# NOTE: There is intentionally NO client-facing endpoint to set subscription_status.
+# Subscription status is set exclusively by the RevenueCat webhook
+# (POST /api/v1/webhooks/revenuecat), which is protected by a shared secret.
+# A client-facing endpoint would let any authenticated user grant themselves Pro
+# by sending a fake transaction_id.
 
 
 @router.put("/language")
@@ -125,8 +111,19 @@ async def update_notifications(
         profile.fcm_token = body.fcm_token if body.enabled else None
 
     if body.notification_time is not None:
-        h, m = map(int, body.notification_time.split(":"))
-        profile.notification_time = time(h, m)
+        try:
+            parts = body.notification_time.split(":")
+            if len(parts) != 2:
+                raise ValueError("Expected HH:MM")
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError("Hour must be 0–23, minute must be 0–59")
+            profile.notification_time = time(h, m)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid notification_time. Expected HH:MM (24-hour). {exc}",
+            )
 
     if body.timezone is not None:
         profile.device_timezone = body.timezone
