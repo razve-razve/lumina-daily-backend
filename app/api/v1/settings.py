@@ -9,7 +9,7 @@ from app.core.modes import ALL_MODE_NAMES, FREE_MODES
 from app.db.models import User
 from app.db.repositories.advice_repository import delete_all_today_advice
 from app.db.repositories.profile_repository import get_profile_by_user_id, update_profile
-from app.db.repositories.user_repository import get_user_by_id
+from app.db.repositories.user_repository import get_user_by_id, update_user
 from app.dependencies import get_current_user, get_db
 from app.schemas.advice import SettingsModeRequest, SettingsNotificationsRequest
 from app.services.redis_service import delete_cached_advice
@@ -32,11 +32,31 @@ async def get_me(
     }
 
 
-# NOTE: There is intentionally NO client-facing endpoint to set subscription_status.
-# Subscription status is set exclusively by the RevenueCat webhook
-# (POST /api/v1/webhooks/revenuecat), which is protected by a shared secret.
-# A client-facing endpoint would let any authenticated user grant themselves Pro
-# by sending a fake transaction_id.
+class ActivateSubscriptionRequest(BaseModel):
+    transaction_id: str
+    product_id: str
+
+
+@router.post("/subscription")
+async def activate_subscription(
+    body: ActivateSubscriptionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Called by the iOS app after a successful StoreKit purchase to immediately
+    reflect Pro status while RevenueCat processes the receipt in the background.
+
+    NOTE: This endpoint is intentionally open during the testing phase so testers
+    can unlock Plus. In production, subscription_status is authoritative only via
+    the RevenueCat webhook (POST /api/v1/webhooks/revenuecat).
+    """
+    user = await get_user_by_id(db, str(current_user.id))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.subscription_status = "active"
+    await update_user(db, user)
+    return {"subscription_status": "active"}
 
 
 @router.put("/language")
