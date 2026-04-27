@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from app.api.v1 import admin, advice, auth, location, profile, settings, timezone, webhooks
 from app.core.batch_job import run_advice_job, run_notification_job
 from app.core.ephemeris import init_ephemeris
+from app.core.jwt_verifier import warm_jwks_cache
 from app.db.session import engine
 from app.services.redis_service import close_redis
 
@@ -20,6 +21,7 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 async def lifespan(app: FastAPI):
     # Startup
     init_ephemeris()
+    await warm_jwks_cache()   # fetch Supabase JWKS now so the first real request never waits
     # Advice generation — runs every hour, generates advice for each user's LOCAL today.
     # Processes users whose timezone just started a new day, so advice is always ready.
     scheduler.add_job(run_advice_job, "cron", minute=0, id="hourly_advice")
