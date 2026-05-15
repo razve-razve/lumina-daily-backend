@@ -13,6 +13,7 @@ from app.core.ephemeris import (
     calculate_current_transits,
     calculate_transit_aspects_to_natal,
     get_moon_phase,
+    get_moon_phase_for_date,
     now_julian_day,
 )
 from app.core.scoring import build_transit_tags, score_categories
@@ -220,3 +221,55 @@ async def get_transit_explanation(
 
     await redis_setex(cache_key, 86400, explanation)
     return {"explanation": explanation}
+
+
+# ---------------------------------------------------------------------------
+# Public moon-phases endpoint — no auth, cached globally, same for all users
+# ---------------------------------------------------------------------------
+
+class MoonPhaseEntry(BaseModel):
+    date: str    # "YYYY-MM-DD"
+    phase: str   # e.g. "Full Moon"
+
+
+@router.get("/moon-phases", response_model=list[MoonPhaseEntry])
+async def get_moon_phases(
+    start: date = Query(..., description="Start date (YYYY-MM-DD)"),
+    end:   date = Query(..., description="End date (YYYY-MM-DD), inclusive"),
+) -> list[MoonPhaseEntry]:
+    """
+    Return the moon phase for every day in [start, end].
+    Pure astronomy — no user data, no AI. Cached in Redis for 24 hours.
+    Capped at 200 days to prevent abuse.
+    """
+    from datetime import timedelta
+
+    delta = (end - start).days
+    if delta < 0 or delta > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Date range must be between 1 and 200 days.",
+        )
+
+    cache_key = f"moon_phases:{start.isoformat()}:{end.isoformat()}"
+    cached = await redis_get(cache_key)
+    if cached:
+        import json
+        return [MoonPhaseEntry(**e) for e in json.loads(cached)]
+
+    # Calculate in a thread pool — swisseph is CPU-bound
+    def _compute() -> list[dict]:
+        result = []
+        current = start
+        while current <= end:
+            phase = get_moon_phase_for_date(current.year, current.month, current.day)
+            result.append({"date": current.isoformat(), "phase": phase})
+            current += timedelta(days=1)
+        return result
+
+    entries = await asyncio.get_event_loop().run_in_executor(None, _compute)
+
+    import json
+    await redis_setex(cache_key, 86400, json.dumps(entries))   # cache 24 h
+
+    return [MoonPhaseEntry(**e) for e in entries]

@@ -196,3 +196,17 @@ def get_moon_phase(transits: dict) -> str:
         if angle < threshold:
             return name
     return "New Moon"
+
+
+def get_moon_phase_for_date(year: int, month: int, day: int) -> str:
+    """Calculate moon phase for any date (noon UTC). Pure astronomy — no AI, no user data."""
+    swe.set_ephe_path(settings.ephe_path)
+    jd = swe.julday(year, month, day, 12.0)   # noon UTC
+    flags = swe.FLG_SWIEPH | swe.FLG_SPEED
+    sun_pos,  _ = swe.calc_ut(jd, swe.SUN,  flags)
+    moon_pos, _ = swe.calc_ut(jd, swe.MOON, flags)
+    angle = (moon_pos[0] - sun_pos[0]) % 360
+    for threshold, name in _MOON_PHASES:
+        if angle < threshold:
+            return name
+    return "New Moon"
