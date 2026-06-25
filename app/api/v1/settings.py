@@ -65,7 +65,7 @@ async def update_language(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    supported = {"en", "ru"}
+    supported = {"en", "ru", "pt"}
     if body.language not in supported:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
