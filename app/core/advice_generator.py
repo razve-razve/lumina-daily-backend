@@ -32,7 +32,7 @@ CATEGORIES = [
 
 
 def _language_name(code: str) -> str:
-    return {"en": "English", "ru": "Russian"}.get(code, "English")
+    return {"en": "English", "ru": "Russian", "pt": "Portuguese (Brazilian)"}.get(code, "English")
 
 
 def _format_aspects(transit_aspects: list[dict]) -> str:
