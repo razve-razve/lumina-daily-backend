@@ -46,6 +46,18 @@ def _format_aspects(transit_aspects: list[dict]) -> str:
     )
 
 
+_REAL_LIFE_GROUNDING = (
+    "Real-life grounding (CRITICAL — applies regardless of mode):\n"
+    "The person using this app lives an ordinary life. They go to work or study, "
+    "come home, communicate with family, a partner, friends, or colleagues. "
+    "Their concerns are real and everyday: a difficult conversation, a work deadline, "
+    "tiredness after a long day, money decisions, weekend plans, a tense moment at home. "
+    "Ground your advice in this reality. Even in poetic or spiritual modes, the examples "
+    "and situations you reference must be recognizable from ordinary daily life. "
+    "Never assume the person meditates, journals, does yoga, or has a spiritual practice "
+    "unless it is the explicit framework of the chosen mode.\n"
+)
+
 _RUSSIAN_RULES = (
     "Russian-specific rules (CRITICAL):\n"
     "- Always address the person using the formal ВЫ (вы/вас/вам/вами/вашу/ваш/ваше/ваши). "
@@ -71,6 +83,7 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"Style: {cfg.style}\n\n"
         f"Concepts and vocabulary to draw on: {cfg.concepts}\n\n"
         f"Strictly avoid: {cfg.avoid}\n\n"
+        f"{_REAL_LIFE_GROUNDING}\n"
         f"Additional rules:\n"
         f"- Be specific to THIS person's natal placements and TODAY's actual aspects.\n"
         f"- Never mention degree numbers (e.g. '15° Scorpio').\n"
