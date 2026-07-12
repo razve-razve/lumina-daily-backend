@@ -18,7 +18,7 @@ from app.core.ephemeris import (
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice, User
-from app.db.repositories.advice_repository import create_advice, get_advice
+from app.db.repositories.advice_repository import create_advice, get_advice, get_advice_range
 from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.dependencies import get_current_user, get_db
 from app.schemas.advice import CategoryCard, DailyAdviceResponse
@@ -181,6 +181,40 @@ async def get_advice_for_date(
     # Past date — generate on demand
     advice = await _generate_and_store(profile, user_id, lang, target_date, db)
     return _to_response(advice)
+
+
+class DayScoreEntry(BaseModel):
+    date: str        # "YYYY-MM-DD"
+    avg_score: int   # 1-10 average across the 5 scored categories
+
+
+@router.get("/scores", response_model=list[DayScoreEntry])
+async def get_scores_range(
+    start: date = Query(...),
+    end: date = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Average day scores for all STORED advice in [start, end] — one call for
+    a whole calendar month. Read-only: never generates advice (unlike /date),
+    so it is safe to call for arbitrary ranges."""
+    if end < start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end must be >= start")
+    if (end - start).days > 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Range too large (max 100 days).")
+
+    rows = await get_advice_range(db, current_user.id, start, end)
+    seen: dict[str, int] = {}
+    for a in rows:
+        # If advice exists in several modes/languages for the same date, first wins
+        key = a.date.isoformat()
+        if key not in seen:
+            avg = round(
+                (a.love_score + a.work_score + a.energy_score
+                 + a.communication_score + a.mood_score) / 5
+            )
+            seen[key] = max(1, min(10, avg))
+    return [DayScoreEntry(date=d, avg_score=s) for d, s in sorted(seen.items())]
 
 
 class TransitExplanationRequest(BaseModel):

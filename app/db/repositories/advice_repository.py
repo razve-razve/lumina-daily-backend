@@ -25,6 +25,23 @@ async def get_advice(
     return result.scalar_one_or_none()
 
 
+async def get_advice_range(
+    db: AsyncSession, user_id: uuid.UUID, start: date, end: date,
+) -> list[DailyAdvice]:
+    """All stored advice rows for a user in [start, end] — any mode/language.
+    Read-only: never triggers generation."""
+    result = await db.execute(
+        select(DailyAdvice)
+        .where(
+            DailyAdvice.user_id == user_id,
+            DailyAdvice.date >= start,
+            DailyAdvice.date <= end,
+        )
+        .order_by(DailyAdvice.date)
+    )
+    return list(result.scalars().all())
+
+
 async def create_advice(db: AsyncSession, advice: DailyAdvice) -> DailyAdvice:
     try:
         db.add(advice)
