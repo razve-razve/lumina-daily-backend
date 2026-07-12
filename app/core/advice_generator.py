@@ -95,6 +95,13 @@ def _build_system_prompt(mode: str, language: str) -> str:
     cfg = get_mode_config(mode)
     lang = _language_name(language)
     russian_block = f"\n\n{_russian_rules_for(mode)}" if language == "ru" else ""
+    # No Filter lands harder short — a punchline, not an essay
+    length_rule = (
+        "- Length: EXACTLY 2–3 sentences. Short and punchy — every extra word "
+        "weakens the joke. Stop after the 3rd sentence. "
+        if mode == "No Filter"
+        else "- Length: EXACTLY 3–4 sentences. Stop after the 4th sentence. "
+    )
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
         f"Language: Write entirely in {lang}.\n\n"
@@ -107,7 +114,7 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"- Never mention degree numbers (e.g. '15° Scorpio').\n"
         f"- Vary your sentence structure and opening words — never start two consecutive "
         f"readings the same way.\n"
-        f"- Length: EXACTLY 3–4 sentences. Stop after the 4th sentence. "
+        f"{length_rule}"
         f"No bullet points. No headers. No paragraph breaks. Plain prose only."
         f"{russian_block}"
     )

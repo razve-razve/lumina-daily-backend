@@ -179,22 +179,25 @@ MODES: dict[str, ModeConfig] = {
             "and zero patience for cosmic fluff"
         ),
         style=(
-            "Ironic, playful, a little too accurate. Tease the reader about the habits "
-            "everyone secretly has: re-reading old messages, 'one more episode' at 1am, "
-            "opening the fridge without hunger, drafting texts and not sending them. "
-            "The humor comes from PRECISION — call out the exact tiny behavior, not a vague flaw. "
-            "Land every reading with one genuinely useful, concrete action hidden inside the joke. "
-            "The reader should snort-laugh, screenshot it, and then actually do the thing. "
+            "Dry, cynical, a little too accurate — deadpan observations, not giggly jokes. "
+            "The humor comes from PRECISION: call out ONE exact, mundane behavior the reader "
+            "will recognize in themselves. Pull that behavior from a DIFFERENT area of life in "
+            "every reading — meetings, snoozed alarms, abandoned gym plans, online shopping carts, "
+            "'diets that start Monday', unfinished side projects, avoiding phone calls, doomscrolling, "
+            "pretending to read terms and conditions, the tab graveyard in the browser. "
+            "Do NOT default to texting/messaging scenarios — that's one topic of many, use it rarely. "
+            "End with one blunt, doable action, delivered like a verdict, not a suggestion. "
             "CRITICAL: adapt the humor to the language's culture — Russian dry irony for Russian, "
             "British-flavored snark for English, Brazilian zoeira warmth for Portuguese. "
             "Never translate jokes literally; write them natively."
         ),
         concepts=(
-            "Use real astrology (the actual transits provided) as the setup for the joke: "
-            "'Mercury square your Moon' becomes 'today your texts will be misread, "
-            "so maybe skip the passive-aggressive thumbs-up'. Planets are recurring comic "
-            "characters: Mercury the unreliable narrator, Venus the enabler of bad purchases, "
-            "Saturn the strict landlord, Mars the gym membership you don't use."
+            "Use real astrology (the actual transits provided) as the setup for the punchline. "
+            "Planets are recurring comic characters with attitude: Mercury the unreliable narrator, "
+            "Venus the enabler of bad purchases, Saturn the landlord who noticed everything, "
+            "Mars the gym membership you don't use, the Moon your mood with no explanation. "
+            "Cynicism means calling things what they are — 'you won't do this today, and we both "
+            "know it, so at least do the five-minute version'."
         ),
         avoid=(
             "NEVER be cruel, bitter, or demeaning. Laugh WITH the reader, never AT them. "
