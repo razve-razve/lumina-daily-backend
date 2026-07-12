@@ -197,6 +197,57 @@ async def generate_theme(
     return response.choices[0].message.content.strip()
 
 
+async def generate_weekly_text(
+    *,
+    name: str,
+    language: str,
+    mode: str,
+    sun_sign: str,
+    moon_sign: str,
+    rising: str,
+    week_range: str,
+    day_scores_line: str,
+    aspect_list: str,
+) -> str:
+    """One weekly forecast text — a single call per user per week (Redis-cached)."""
+    client = get_openai_client()
+    cfg = get_mode_config(mode)
+    lang = _language_name(language)
+    russian_block = f"\n\n{_RUSSIAN_RULES}" if language == "ru" else ""
+    system = (
+        f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
+        f"Language: Write entirely in {lang}.\n\n"
+        f"Style: {cfg.style}\n\n"
+        f"Strictly avoid: {cfg.avoid}\n\n"
+        f"{_REAL_LIFE_GROUNDING}\n"
+        f"Task: Write the WEEKLY forecast — an overview of the person's week ahead.\n"
+        f"- Open with the week's overall theme in one sentence.\n"
+        f"- Name specific weekdays when giving timing advice (e.g. 'Wednesday is best "
+        f"for the hard conversation', 'protect your energy on Friday') — use the "
+        f"day scores provided, higher = better.\n"
+        f"- Cover work and relationships at least once each.\n"
+        f"- Length: EXACTLY 5-6 sentences. No bullet points. No headers. Plain prose only."
+        f"{russian_block}"
+    )
+    user_msg = (
+        f"Person: {name}. Sun in {sun_sign}, Moon in {moon_sign}, Rising {rising}.\n"
+        f"Week: {week_range}.\n"
+        f"Day scores (1-10, higher = smoother day): {day_scores_line}.\n"
+        f"Strongest transits this week: {aspect_list}.\n\n"
+        f"Write this person's weekly forecast."
+    )
+    response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user_msg},
+        ],
+        temperature=0.85,
+        max_tokens=500,
+    )
+    return response.choices[0].message.content.strip()
+
+
 async def generate_transit_explanation(
     *,
     transit_tag: str,

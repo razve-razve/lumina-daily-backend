@@ -1,14 +1,16 @@
 from __future__ import annotations
 import asyncio
-from datetime import date, datetime, timezone
+import json
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import swisseph as swe
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.advice_generator import generate_all_advice, generate_transit_explanation
+from app.core.advice_generator import generate_all_advice, generate_transit_explanation, generate_weekly_text
 from app.core.ephemeris import (
     calculate_current_transits,
     calculate_transit_aspects_to_natal,
@@ -181,6 +183,105 @@ async def get_advice_for_date(
     # Past date — generate on demand
     advice = await _generate_and_store(profile, user_id, lang, target_date, db)
     return _to_response(advice)
+
+
+class WeeklyForecastResponse(BaseModel):
+    week_start: str            # Monday, "YYYY-MM-DD"
+    week_end: str              # Sunday
+    text: str                  # AI-written forecast, 5-6 sentences
+    best_day: str              # "YYYY-MM-DD" — highest avg score
+    challenging_day: str       # "YYYY-MM-DD" — lowest avg score
+    day_scores: list[dict]     # [{date, avg_score}] for all 7 days
+
+
+@router.get("/weekly", response_model=WeeklyForecastResponse)
+async def get_weekly_forecast(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Weekly forecast — Pro only. One GPT call per user per ISO week (Redis-cached)."""
+    if current_user.subscription_status not in ("pro", "active"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Lumina Plus required.")
+
+    user_id = current_user.id
+    lang = current_user.language or "en"
+
+    profile = await get_profile_by_user_id(db, user_id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+
+    local_today = _user_local_date(profile.device_timezone)
+    week_start = local_today - timedelta(days=local_today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)
+
+    cache_key = f"weekly:{user_id}:{week_start.isoformat()}:{profile.interpretation_mode}:{lang}"
+    cached = await redis_get(cache_key)
+    if cached:
+        return WeeklyForecastResponse(**json.loads(cached))
+
+    natal_planets = (profile.natal_chart_json or {}).get("planets", {})
+    houses = (profile.natal_chart_json or {}).get("houses", {})
+
+    def compute_week() -> tuple[list[dict], list[dict]]:
+        """Per-day avg scores + strongest unique aspects of the week (sync, thread pool)."""
+        day_rows: list[dict] = []
+        best_aspects: dict[str, dict] = {}
+        for i in range(7):
+            d = week_start + timedelta(days=i)
+            jd = swe.julday(d.year, d.month, d.day, 12.0)
+            transits = calculate_current_transits(jd)
+            aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
+            scores = score_categories(aspects)
+            avg = round(
+                (scores["love"] + scores["work"] + scores["energy"]
+                 + scores["communication"] + scores["mood"]) / 5
+            )
+            day_rows.append({"date": d.isoformat(), "avg_score": max(1, min(10, avg))})
+            for a in aspects:
+                key = f"{a['transiting_planet']} {a['aspect']} {a['natal_planet']}"
+                if key not in best_aspects or a["orb"] < best_aspects[key]["orb"]:
+                    best_aspects[key] = a
+        top = sorted(best_aspects.values(), key=lambda a: a["orb"])[:5]
+        return day_rows, top
+
+    loop = asyncio.get_event_loop()
+    day_rows, top_aspects = await loop.run_in_executor(None, compute_week)
+
+    best_day = max(day_rows, key=lambda r: r["avg_score"])["date"]
+    challenging_day = min(day_rows, key=lambda r: r["avg_score"])["date"]
+
+    weekday_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    day_scores_line = ", ".join(
+        f"{weekday_names[i]} {r['date'][5:]}: {r['avg_score']}" for i, r in enumerate(day_rows)
+    )
+    aspect_list = ", ".join(
+        f"{a['transiting_planet']} {a['aspect']} natal {a['natal_planet']} (orb {a['orb']:.1f}°)"
+        for a in top_aspects
+    ) or "no major exact transits this week"
+
+    planets = natal_planets
+    text = await generate_weekly_text(
+        name=profile.name,
+        language=lang,
+        mode=profile.interpretation_mode,
+        sun_sign=planets.get("Sun", {}).get("sign", "unknown"),
+        moon_sign=planets.get("Moon", {}).get("sign", "unknown"),
+        rising=houses.get("asc_sign", "unknown"),
+        week_range=f"{week_start.isoformat()} to {week_end.isoformat()}",
+        day_scores_line=day_scores_line,
+        aspect_list=aspect_list,
+    )
+
+    result = WeeklyForecastResponse(
+        week_start=week_start.isoformat(),
+        week_end=week_end.isoformat(),
+        text=text,
+        best_day=best_day,
+        challenging_day=challenging_day,
+        day_scores=day_rows,
+    )
+    await redis_setex(cache_key, 8 * 86400, json.dumps(result.model_dump()))
+    return result
 
 
 class DayScoreEntry(BaseModel):
