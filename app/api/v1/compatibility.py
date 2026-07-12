@@ -62,7 +62,50 @@ def _is_pro(user: User) -> bool:
     return user.subscription_status in ("pro", "active")
 
 
-def _to_detail(p: CompatibilityPartner, pro: bool) -> PartnerDetailResponse:
+def _texts_by_language(p: CompatibilityPartner) -> dict:
+    """Normalize stored texts to {language: {summary, romance, ...}}.
+    Rows created before multi-language support stored a flat dict."""
+    stored = p.texts or {}
+    if "summary" in stored:  # legacy flat format
+        return {p.language or "en": stored}
+    return stored
+
+
+async def _texts_for_language(
+    p: CompatibilityPartner, lang: str, db: AsyncSession, user_profile,
+) -> dict:
+    """Texts in the requested language — generate once and persist if missing."""
+    by_lang = _texts_by_language(p)
+    if lang in by_lang:
+        return by_lang[lang]
+
+    user_planets = (user_profile.natal_chart_json or {}).get("planets", {})
+    aspect_list = ", ".join(
+        f"{p.name}'s {a['partner_planet']} {a['aspect']} {user_profile.name}'s {a['user_planet']} "
+        f"(orb {a['orb']:.1f}°)"
+        for a in (p.aspects or [])
+    ) or "no close inter-chart aspects"
+
+    texts = await generate_compatibility_texts(
+        user_name=user_profile.name,
+        partner_name=p.name,
+        language=lang,
+        user_sun=user_planets.get("Sun", {}).get("sign", "unknown"),
+        user_moon=user_planets.get("Moon", {}).get("sign", "unknown"),
+        partner_sun=p.partner_sun_sign,
+        partner_moon=p.partner_moon_sign,
+        aspect_list=aspect_list,
+        sphere_scores=p.sphere_scores or {},
+        overall=p.overall,
+    )
+    by_lang[lang] = texts
+    p.texts = dict(by_lang)   # reassign so SQLAlchemy sees the JSONB change
+    db.add(p)
+    await db.commit()
+    return texts
+
+
+def _to_detail(p: CompatibilityPartner, pro: bool, texts: dict) -> PartnerDetailResponse:
     return PartnerDetailResponse(
         id=str(p.id),
         name=p.name,
@@ -70,9 +113,9 @@ def _to_detail(p: CompatibilityPartner, pro: bool) -> PartnerDetailResponse:
         partner_sun_sign=p.partner_sun_sign,
         partner_moon_sign=p.partner_moon_sign,
         overall=p.overall,
-        summary=(p.texts or {}).get("summary", ""),
+        summary=texts.get("summary", ""),
         sphere_scores=p.sphere_scores if pro else None,
-        texts=p.texts if pro else None,
+        texts=texts if pro else None,
     )
 
 
@@ -147,7 +190,7 @@ async def add_partner(
         partner_moon_sign=partner_chart["planets"]["Moon"]["sign"],
         overall=syn["overall"],
         sphere_scores=syn["sphere_scores"],
-        texts=texts,
+        texts={lang: texts},   # keyed by language — more generated on demand
         aspects=syn["aspects"],
         language=lang,
     )
@@ -155,7 +198,7 @@ async def add_partner(
     await db.commit()
     await db.refresh(partner)
 
-    return _to_detail(partner, _is_pro(current_user))
+    return _to_detail(partner, _is_pro(current_user), texts)
 
 
 @router.get("", response_model=list[PartnerListItem])
@@ -193,7 +236,14 @@ async def get_partner(
     partner = result.scalar_one_or_none()
     if not partner:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
-    return _to_detail(partner, _is_pro(current_user))
+
+    # Serve texts in the user's CURRENT app language — generate once if missing
+    lang = current_user.language or "en"
+    profile = await get_profile_by_user_id(db, current_user.id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found.")
+    texts = await _texts_for_language(partner, lang, db, profile)
+    return _to_detail(partner, _is_pro(current_user), texts)
 
 
 @router.delete("/{partner_id}")
