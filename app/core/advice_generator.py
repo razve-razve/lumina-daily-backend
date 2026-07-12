@@ -71,12 +71,30 @@ _RUSSIAN_RULES = (
     "- Complete every sentence fully. Never cut off mid-sentence."
 )
 
+# "No Filter" mode: irony demands informal address — formal ВЫ kills the joke.
+_RUSSIAN_RULES_INFORMAL = (
+    "Russian-specific rules (CRITICAL):\n"
+    "- Address the person using the informal ТЫ (ты/тебя/тебе/твой/твою). "
+    "Never use formal вы — this mode is a close friend talking, not a consultant.\n"
+    "- Apply correct Russian grammatical gender to all astrological terms: "
+    "Луна (feminine — натальная Луна, твою натальную Луну), "
+    "Венера (feminine), Марс (masculine), Меркурий (masculine), Юпитер (masculine), "
+    "Сатурн (masculine), Уран (masculine), Нептун (masculine), Плутон (masculine), "
+    "Солнце (neuter).\n"
+    "- Write natural, living Russian with real ирония — no calques from English humor.\n"
+    "- Complete every sentence fully. Never cut off mid-sentence."
+)
+
+
+def _russian_rules_for(mode: str) -> str:
+    return _RUSSIAN_RULES_INFORMAL if mode == "No Filter" else _RUSSIAN_RULES
+
 
 def _build_system_prompt(mode: str, language: str) -> str:
     """Build a rich, mode-specific system prompt for category guidance."""
     cfg = get_mode_config(mode)
     lang = _language_name(language)
-    russian_block = f"\n\n{_RUSSIAN_RULES}" if language == "ru" else ""
+    russian_block = f"\n\n{_russian_rules_for(mode)}" if language == "ru" else ""
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
         f"Language: Write entirely in {lang}.\n\n"
@@ -100,7 +118,8 @@ def _build_theme_prompt(mode: str, language: str) -> str:
     cfg = get_mode_config(mode)
     lang = _language_name(language)
     russian_note = (
-        " Use formal ВЫ address. Apply correct grammatical gender to all planet names."
+        (" Use informal ТЫ address." if mode == "No Filter" else " Use formal ВЫ address.")
+        + " Apply correct grammatical gender to all planet names."
         if language == "ru" else ""
     )
     return (
@@ -213,7 +232,7 @@ async def generate_weekly_text(
     client = get_openai_client()
     cfg = get_mode_config(mode)
     lang = _language_name(language)
-    russian_block = f"\n\n{_RUSSIAN_RULES}" if language == "ru" else ""
+    russian_block = f"\n\n{_russian_rules_for(mode)}" if language == "ru" else ""
     system = (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
         f"Language: Write entirely in {lang}.\n\n"
