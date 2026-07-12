@@ -42,6 +42,7 @@ class PartnerListItem(BaseModel):
     name: str
     partner_sun_sign: str
     partner_moon_sign: str
+    partner_rising_sign: Optional[str] = None
     overall: int
 
 
@@ -51,6 +52,7 @@ class PartnerDetailResponse(BaseModel):
     date_of_birth: str
     partner_sun_sign: str
     partner_moon_sign: str
+    partner_rising_sign: Optional[str] = None
     overall: int
     summary: str
     # Pro-only fields — None for free users
@@ -112,6 +114,7 @@ def _to_detail(p: CompatibilityPartner, pro: bool, texts: dict) -> PartnerDetail
         date_of_birth=p.date_of_birth.isoformat(),
         partner_sun_sign=p.partner_sun_sign,
         partner_moon_sign=p.partner_moon_sign,
+        partner_rising_sign=p.partner_rising_sign,
         overall=p.overall,
         summary=texts.get("summary", ""),
         sphere_scores=p.sphere_scores if pro else None,
@@ -188,6 +191,12 @@ async def add_partner(
         longitude=body.longitude,
         partner_sun_sign=partner_chart["planets"]["Sun"]["sign"],
         partner_moon_sign=partner_chart["planets"]["Moon"]["sign"],
+        # Rising only when both time and place are known — otherwise it's a guess
+        partner_rising_sign=(
+            partner_chart["houses"]["asc_sign"]
+            if body.time_of_birth is not None and body.latitude is not None
+            else None
+        ),
         overall=syn["overall"],
         sphere_scores=syn["sphere_scores"],
         texts={lang: texts},   # keyed by language — more generated on demand
@@ -215,6 +224,7 @@ async def list_partners(
         PartnerListItem(
             id=str(p.id), name=p.name,
             partner_sun_sign=p.partner_sun_sign, partner_moon_sign=p.partner_moon_sign,
+            partner_rising_sign=p.partner_rising_sign,
             overall=p.overall,
         )
         for p in result.scalars().all()

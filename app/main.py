@@ -26,6 +26,11 @@ async def lifespan(app: FastAPI):
     # Create any tables that don't exist yet (idempotent — never alters existing ones)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight in-place migrations: create_all does NOT alter existing tables
+        await conn.exec_driver_sql(
+            "ALTER TABLE compatibility_partners "
+            "ADD COLUMN IF NOT EXISTS partner_rising_sign VARCHAR(16)"
+        )
     # Advice generation — runs every hour, generates advice for each user's LOCAL today.
     # Processes users whose timezone just started a new day, so advice is always ready.
     scheduler.add_job(run_advice_job, "cron", minute=0, id="hourly_advice")

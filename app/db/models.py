@@ -139,6 +139,8 @@ class CompatibilityPartner(Base):
 
     partner_sun_sign: Mapped[str] = mapped_column(String(16), nullable=False)
     partner_moon_sign: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Only when birth time AND place are known — rising is unreliable otherwise
+    partner_rising_sign: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     overall: Mapped[int] = mapped_column(SmallInteger, nullable=False)          # 0-100
     sphere_scores: Mapped[dict] = mapped_column(JSONB, nullable=False)          # {romance, friendship, communication, conflict}: 1-10
