@@ -62,7 +62,66 @@ def _make_jwt() -> str:
     return token
 
 
-async def send_daily_notification(device_token: str, language: str, theme: str = "") -> bool:
+# Notification title hooks — the most informative fact of the day goes in the
+# title (Co-Star-style intrigue beats "your reading is ready"), theme in the body.
+# Russian needs two grammatical cases: genitive for "день для X", instrumental
+# for "осторожнее с X".
+_CATEGORY_PHRASES = {
+    "en": {
+        "love":          ("love", "love"),
+        "work":          ("work", "work"),
+        "energy":        ("energy", "energy"),
+        "communication": ("communication", "communication"),
+        "mood":          ("your mood", "your mood"),
+    },
+    "ru": {
+        "love":          ("любви", "любовью"),
+        "work":          ("работы", "работой"),
+        "energy":        ("энергии", "энергией"),
+        "communication": ("общения", "общением"),
+        "mood":          ("настроения", "настроением"),
+    },
+    "pt": {
+        "love":          ("o amor", "o amor"),
+        "work":          ("o trabalho", "o trabalho"),
+        "energy":        ("a energia", "a energia"),
+        "communication": ("a comunicação", "a comunicação"),
+        "mood":          ("o humor", "o humor"),
+    },
+}
+
+_TITLE_TEMPLATES = {
+    "en": ("Great day for {cat} — {score}/10", "Go easy on {cat} today — {score}/10", "Your day: {avg}/10 ✨"),
+    "ru": ("Отличный день для {cat} — {score}/10", "Сегодня осторожнее с {cat} — {score}/10", "Ваш день: {avg}/10 ✨"),
+    "pt": ("Ótimo dia para {cat} — {score}/10", "Hoje, cuidado com {cat} — {score}/10", "Seu dia: {avg}/10 ✨"),
+}
+
+
+def build_notification_text(language: str, theme: str, scores: dict | None) -> tuple[str, str]:
+    """Title = the day's most striking score (or day average); body = theme."""
+    lang = language if language in _TITLE_TEMPLATES else "en"
+    high_tpl, low_tpl, avg_tpl = _TITLE_TEMPLATES[lang]
+    phrases = _CATEGORY_PHRASES[lang]
+
+    title = "Lumina Daily ✨"
+    if scores:
+        # Most extreme category — the day's headline fact
+        cat, score = max(scores.items(), key=lambda kv: abs(kv[1] - 5.5))
+        avg = round(sum(scores.values()) / len(scores))
+        if score >= 8:
+            title = high_tpl.format(cat=phrases[cat][0], score=score)
+        elif score <= 4:
+            title = low_tpl.format(cat=phrases[cat][1], score=score)
+        else:
+            title = avg_tpl.format(avg=avg)
+
+    body = theme[:160] + ("…" if len(theme) > 160 else "") if theme else ""
+    return title, body
+
+
+async def send_daily_notification(
+    device_token: str, language: str, theme: str = "", scores: dict | None = None
+) -> bool:
     """Send daily push notification via APNs. Returns True on success."""
     if not device_token:
         return False
@@ -72,13 +131,13 @@ async def send_daily_notification(device_token: str, language: str, theme: str =
         logger.warning("APNS_BUNDLE_ID not set — skipping push")
         return False
 
-    if theme:
-        title = "Lumina Daily ✨"
-        body = theme[:160] + ("…" if len(theme) > 160 else "")
+    if theme or scores:
+        title, body = build_notification_text(language, theme, scores)
     else:
         fallback = {
             "en": ("Your daily guidance is ready ✨", "Open Lumina Daily to read your stars."),
             "ru": ("Ваш ежедневный прогноз готов ✨", "Откройте Lumina Daily, чтобы узнать, что говорят звёзды."),
+            "pt": ("Sua leitura diária está pronta ✨", "Abra o Lumina Daily para ler suas estrelas."),
         }
         title, body = fallback.get(language, fallback["en"])
 

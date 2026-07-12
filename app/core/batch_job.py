@@ -244,7 +244,16 @@ async def run_notification_job() -> None:
                 )
                 continue
             success = await send_daily_notification(
-                profile.fcm_token, language, theme=existing.theme
+                profile.fcm_token,
+                language,
+                theme=existing.theme,
+                scores={
+                    "love":          existing.love_score,
+                    "work":          existing.work_score,
+                    "energy":        existing.energy_score,
+                    "communication": existing.communication_score,
+                    "mood":          existing.mood_score,
+                },
             )
             if success:
                 sent += 1
