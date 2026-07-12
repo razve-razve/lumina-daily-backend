@@ -3,9 +3,18 @@ Category scoring (1–10) based on transit aspects to natal planets.
 
 Each category watches a specific set of natal planets.
 Aspect strength = 10 at exact, 1 at orb limit (linear scale).
-Final score = average of strengths for all triggered aspects, clamped to 1–10.
+
+Score formula (calibrated July 2026 — old plain average clustered 58% of all
+scores at 5–6, making them meaningless):
+- Strong aspects dominate weak ones: the raw value blends the plain average
+  with a strength-weighted average, so one exact trine isn't drowned out by
+  three weak background squares.
+- tanh squash calibrated to the realistic raw range (±5) spreads scores
+  across the full 1–10 scale while keeping 1s and 10s rare.
 If no aspects are found for a category, score defaults to 5.
 """
+
+import math
 
 from app.core.ephemeris import ASPECTS
 
@@ -57,9 +66,10 @@ def score_categories(transit_aspects: list[dict]) -> dict[str, int]:
         if not values:
             scores[category] = 5  # neutral default
         else:
-            raw = sum(values) / len(values)   # average, range roughly -10 to +10
-            # Map -10→1, 0→5, +10→10
-            normalized = (raw + 10) / 20 * 9 + 1
+            plain = sum(values) / len(values)
+            weighted = sum(v * abs(v) for v in values) / sum(abs(v) for v in values)
+            raw = 0.5 * (plain + weighted)
+            normalized = 5.5 + 4.6 * math.tanh(raw / 5.0)
             scores[category] = max(1, min(10, round(normalized)))
 
     return scores
