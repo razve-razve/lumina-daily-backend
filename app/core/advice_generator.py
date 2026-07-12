@@ -248,6 +248,75 @@ async def generate_weekly_text(
     return response.choices[0].message.content.strip()
 
 
+_COMPAT_SPHERES = [
+    ("summary",       "Overall compatibility — the essence of how these two people fit together"),
+    ("romance",       "Romance & Attraction — chemistry, tenderness, physical pull"),
+    ("friendship",    "Friendship & Fun — shared joy, ease of spending time together"),
+    ("communication", "Communication — how they talk, listen, and understand each other"),
+    ("conflict",      "Friction & Growth — where tension arises and what it teaches them"),
+]
+
+
+async def generate_compatibility_texts(
+    *,
+    user_name: str,
+    partner_name: str,
+    language: str,
+    user_sun: str, user_moon: str,
+    partner_sun: str, partner_moon: str,
+    aspect_list: str,
+    sphere_scores: dict,
+    overall: int,
+) -> dict[str, str]:
+    """5 texts (summary + 4 spheres), parallel calls — one-time cost per pair."""
+    client = get_openai_client()
+    lang = _language_name(language)
+    russian_block = f"\n\n{_RUSSIAN_RULES}" if language == "ru" else ""
+
+    system = (
+        f"You are a warm, insightful astrologer writing a compatibility reading for "
+        f"the app Lumina Daily. You write about TWO real people and how their charts "
+        f"interact — specific, honest, never generic.\n\n"
+        f"Language: Write entirely in {lang}.\n\n"
+        f"Rules:\n"
+        f"- Speak to the reader ({user_name}) directly as 'you'; call the other person "
+        f"by name ({partner_name}).\n"
+        f"- Ground everything in the actual inter-chart aspects provided.\n"
+        f"- Be honest about friction — sugarcoating makes the reading worthless — but "
+        f"frame tension as workable, never doom.\n"
+        f"{_REAL_LIFE_GROUNDING}"
+        f"- Length: EXACTLY 3-4 sentences. Plain prose only."
+        f"{russian_block}"
+    )
+
+    async def one(sphere_key: str, sphere_desc: str) -> tuple[str, str]:
+        score_note = (
+            f"Overall compatibility: {overall}%."
+            if sphere_key == "summary"
+            else f"This sphere's score: {sphere_scores.get(sphere_key, 5)}/10."
+        )
+        user_msg = (
+            f"{user_name}: Sun in {user_sun}, Moon in {user_moon}.\n"
+            f"{partner_name}: Sun in {partner_sun}, Moon in {partner_moon}.\n"
+            f"Inter-chart aspects: {aspect_list}.\n"
+            f"{score_note}\n\n"
+            f"Write the reading for: {sphere_desc}."
+        )
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user_msg},
+            ],
+            temperature=0.85,
+            max_tokens=400,
+        )
+        return sphere_key, response.choices[0].message.content.strip()
+
+    results = await asyncio.gather(*[one(k, d) for k, d in _COMPAT_SPHERES])
+    return dict(results)
+
+
 async def generate_transit_explanation(
     *,
     transit_tag: str,

@@ -117,3 +117,31 @@ class MoodEntry(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "date", name="uq_mood_user_date"),
     )
+
+
+class CompatibilityPartner(Base):
+    """A saved person + computed synastry result (computed once, never changes)."""
+    __tablename__ = "compatibility_partners"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    date_of_birth: Mapped[date_type] = mapped_column(Date, nullable=False)
+    time_of_birth: Mapped[Optional[time_type]] = mapped_column(Time, nullable=True)
+    time_known: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    city_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Double, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Double, nullable=True)
+
+    partner_sun_sign: Mapped[str] = mapped_column(String(16), nullable=False)
+    partner_moon_sign: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    overall: Mapped[int] = mapped_column(SmallInteger, nullable=False)          # 0-100
+    sphere_scores: Mapped[dict] = mapped_column(JSONB, nullable=False)          # {romance, friendship, communication, conflict}: 1-10
+    texts: Mapped[dict] = mapped_column(JSONB, nullable=False)                  # {summary, romance, friendship, communication, conflict}
+    aspects: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # top inter-chart aspects
+    language: Mapped[str] = mapped_column(String(8), nullable=False, default="en")
