@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
-from app.api.v1 import admin, advice, auth, location, profile, settings, timezone, webhooks
+from app.api.v1 import admin, advice, auth, location, mood, profile, settings, timezone, webhooks
 from app.core.batch_job import run_advice_job, run_notification_job
 from app.core.ephemeris import init_ephemeris
 from app.core.jwt_verifier import warm_jwks_cache
+from app.db.models import Base
 from app.db.session import engine
 from app.services.redis_service import close_redis
 
@@ -22,6 +23,9 @@ async def lifespan(app: FastAPI):
     # Startup
     init_ephemeris()
     await warm_jwks_cache()   # fetch Supabase JWKS now so the first real request never waits
+    # Create any tables that don't exist yet (idempotent — never alters existing ones)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     # Advice generation — runs every hour, generates advice for each user's LOCAL today.
     # Processes users whose timezone just started a new day, so advice is always ready.
     scheduler.add_job(run_advice_job, "cron", minute=0, id="hourly_advice")
@@ -53,6 +57,7 @@ app.include_router(advice.router,   prefix="/api/v1/advice",   tags=["advice"])
 app.include_router(location.router, prefix="/api/v1/location", tags=["location"])
 app.include_router(timezone.router, prefix="/api/v1/timezone", tags=["timezone"])
 app.include_router(settings.router, prefix="/api/v1/settings", tags=["settings"])
+app.include_router(mood.router,     prefix="/api/v1/mood",     tags=["mood"])
 app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
 app.include_router(admin.router,    prefix="/api/v1/admin",    tags=["admin"])
 

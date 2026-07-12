@@ -100,3 +100,20 @@ class DailyAdvice(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "date", "mode", name="uq_user_date_mode"),
     )
+
+
+class MoodEntry(Base):
+    """User's own 1-5 rating of how their day actually went (mood journal)."""
+    __tablename__ = "mood_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1-5
+    created_at = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_mood_user_date"),
+    )
