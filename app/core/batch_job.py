@@ -223,16 +223,24 @@ async def run_notification_job() -> None:
                 else _DEFAULT_LOCAL_HOUR
             )
 
-            if current_local_hour != desired_hour:
+            # Catch-up window: fire if the local hour is at or past the desired
+            # hour, up to CATCHUP_HOURS later. If a deploy/cold-start makes the
+            # server miss the exact :00 run, the next hourly run still delivers —
+            # instead of the user silently losing the day's notification.
+            # Capped so a long outage never triggers a notification late at night.
+            _CATCHUP_HOURS = 6
+            if not (desired_hour <= current_local_hour <= desired_hour + _CATCHUP_HOURS):
                 continue
 
             # --- Duplicate-send guard (atomic Redis lock) ---
+            # Key is per-DAY (not per-hour) so catch-up runs can't double-send:
+            # once today's push goes out, every later run this day sees the lock.
             user_today = _user_local_date(tz_id)
-            lock_key = f"notif_sent:{user.id}:{user_today.isoformat()}:{desired_hour}"
-            claimed = await redis_setnx(lock_key, ttl=7200, value="1")  # 2-hour TTL
+            lock_key = f"notif_sent:{user.id}:{user_today.isoformat()}"
+            claimed = await redis_setnx(lock_key, ttl=72000, value="1")  # 20-hour TTL
             if not claimed:
-                # Another instance already sent this notification — skip.
-                logger.info(f"Skipping duplicate push for user {user.id} (lock already held)")
+                # Already sent today (or another instance is sending) — skip.
+                logger.info(f"Skipping duplicate push for user {user.id} (already sent today)")
                 continue
 
             # Look up advice for the user's LOCAL today
