@@ -68,6 +68,8 @@ app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"]
 app.include_router(admin.router,    prefix="/api/v1/admin",    tags=["admin"])
 
 
-@app.get("/health", tags=["health"])
+# Accept GET and HEAD — UptimeRobot pings with HEAD by default, and a GET-only
+# route answers HEAD with 405, which the monitor misreads as "down".
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
 async def health():
     return {"status": "ok"}
