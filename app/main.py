@@ -31,6 +31,14 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE compatibility_partners "
             "ADD COLUMN IF NOT EXISTS partner_rising_sign VARCHAR(16)"
         )
+        # SECURITY: tables created via create_all have NO Row-Level Security, so
+        # the Supabase Data API (PostgREST, anon key) exposes them publicly.
+        # ENABLE (not FORCE) RLS: the table owner `postgres` — the role the backend
+        # connects as — bypasses RLS automatically, so the backend keeps full access,
+        # while the anon role (which owns nothing and has no policies) is denied.
+        # Idempotent: ENABLE on an already-enabled table is a no-op.
+        for _tbl in ("mood_entries", "compatibility_partners"):
+            await conn.exec_driver_sql(f"ALTER TABLE {_tbl} ENABLE ROW LEVEL SECURITY")
     # Advice generation — runs every hour, generates advice for each user's LOCAL today.
     # Processes users whose timezone just started a new day, so advice is always ready.
     scheduler.add_job(run_advice_job, "cron", minute=0, id="hourly_advice")
