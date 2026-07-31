@@ -40,11 +40,16 @@ def _language_name(code: str) -> str:
 # 12-sample language-purity scan). Exception — No Filter's roast humor lands
 # sharper on gpt-4o, so that Pro mode stays on gpt-4o.
 _DEFAULT_MODEL = "gpt-5.6-luna"
-_MODEL_OVERRIDES = {"No Filter": "gpt-4o"}
 
 
-def _model_for_mode(mode: str) -> str:
-    return _MODEL_OVERRIDES.get(mode, _DEFAULT_MODEL)
+def _model_for(mode: str, language: str) -> str:
+    """gpt-4o for No Filter (roast humor lands sharper) AND for Russian (Luna's
+    Russian has unnatural collocations — 'направить амбиции в результат',
+    'закрыть сроки'). Luna (cheap) for English & Portuguese, where its output
+    is clean and matches/beats gpt-4o."""
+    if mode == "No Filter" or language == "ru":
+        return "gpt-4o"
+    return _DEFAULT_MODEL
 
 
 def _completion_kwargs(model: str, max_out: int, temperature: float) -> dict:
@@ -246,7 +251,7 @@ async def generate_category_text(
     ]
     response = await client.chat.completions.create(
         messages=messages,
-        **_completion_kwargs(_model_for_mode(mode), max_out=1000, temperature=0.88),
+        **_completion_kwargs(_model_for(mode, language), max_out=1000, temperature=0.88),
     )
     text = (response.choices[0].message.content or "").strip()
     # Safety net: an empty category cell is unacceptable. If the model ever
@@ -286,7 +291,7 @@ async def generate_theme(
     response = await client.chat.completions.create(
         messages=messages,
         # generous cap: gpt-5 reasoning tokens share this budget with the output
-        **_completion_kwargs(_model_for_mode(mode), max_out=700, temperature=0.82),
+        **_completion_kwargs(_model_for(mode, language), max_out=700, temperature=0.82),
     )
     text = (response.choices[0].message.content or "").strip()
     if not text:  # never ship an empty theme — fall back to gpt-4o
@@ -342,7 +347,7 @@ async def generate_weekly_text(
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        **_completion_kwargs(_model_for_mode(mode), max_out=1200, temperature=0.85),
+        **_completion_kwargs(_model_for(mode, language), max_out=1200, temperature=0.85),
     )
     return response.choices[0].message.content.strip()
 
@@ -407,7 +412,7 @@ async def generate_compatibility_texts(
                 {"role": "user",   "content": user_msg},
             ],
             # Compatibility has no "mode" — always the cheap default model.
-            **_completion_kwargs(_DEFAULT_MODEL, max_out=1000, temperature=0.85),
+            **_completion_kwargs(_model_for("", language), max_out=1000, temperature=0.85),
         )
         return sphere_key, response.choices[0].message.content.strip()
 
