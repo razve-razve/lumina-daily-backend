@@ -32,6 +32,15 @@ CATEGORY_PLANETS: dict[str, list[str]] = {
 CHALLENGING_ASPECTS = {"opposition", "square", "quincunx"}
 FLOWING_ASPECTS     = {"trine", "sextile", "semi-sextile", "conjunction"}
 
+# Slow outer planets sit in near-exact aspects for WEEKS, which froze daily
+# scores (esp. mood/communication, watched by a single natal planet) — a Pluto
+# square to your Moon pinned mood at 2 for a week. Since this is a DAILY score,
+# down-weight slow planets so they set a background tint while fast personal
+# planets (Sun/Moon/Mercury/Venus/Mars) drive day-to-day variation.
+# (July 2026 fix, weight 0.4 validated on 14-day simulations.)
+_SLOW_PLANETS = {"Jupiter", "Saturn", "Uranus", "Neptune", "Pluto", "North Node", "South Node"}
+_SLOW_WEIGHT = 0.4
+
 
 def _aspect_strength(orb: float, aspect_name: str) -> float:
     """Linear strength: exact = 10, at max orb = 1."""
@@ -53,6 +62,10 @@ def score_categories(transit_aspects: list[dict]) -> dict[str, int]:
         aspect_name  = asp["aspect"]
         orb          = asp["orb"]
         strength     = _aspect_strength(orb, aspect_name)
+
+        # Down-weight slow outer planets so a weeks-long transit tints, not freezes
+        if asp["transiting_planet"] in _SLOW_PLANETS:
+            strength *= _SLOW_WEIGHT
 
         for category, planets in CATEGORY_PLANETS.items():
             if natal_planet in planets:
