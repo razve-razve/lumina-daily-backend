@@ -68,8 +68,9 @@ def _completion_kwargs(model: str, max_out: int, temperature: float) -> dict:
 _STYLE_ADDENDUM = (
     "\n\nStyle (critical):\n"
     "- Open by addressing the person by their first name, then a comma.\n"
-    "- Every sentence must name a real, doable action or a specific concrete "
-    "behavior — no filler, no vague uplift, no wellness clichés."
+    "- Give ONE clear, doable action for the day — not a checklist crammed into every "
+    "sentence. Concrete and grounded, but light and readable: no filler, no vague uplift, "
+    "no wellness clichés, and no piling on multiple to-dos."
 )
 
 
@@ -98,6 +99,15 @@ _REAL_LIFE_GROUNDING = (
     "and situations you reference must be recognizable from ordinary daily life. "
     "Never assume the person meditates, journals, does yoga, or has a spiritual practice "
     "unless it is the explicit framework of the chosen mode.\n"
+    "\n"
+    "Relationships — NEVER ASSUME (CRITICAL):\n"
+    "- Do NOT assume the reader is in a relationship. Many readers are single. For love/"
+    "relationship advice, keep it open: 'someone you're close to', 'a person you're dating "
+    "or interested in', 'the people you love' — so it fits single and partnered readers alike.\n"
+    "- NEVER assume the gender of the reader's partner or love interest. Do not write "
+    "'партнёрша'/'girlfriend'/'boyfriend' or gender the other person. Use neutral wording "
+    "('партнёр', 'близкий человек', 'тот, кто вам дорог'). This must work for readers of any "
+    "gender or sexual orientation.\n"
 )
 
 _RUSSIAN_RULES = (
@@ -142,7 +152,9 @@ def _build_system_prompt(mode: str, language: str) -> str:
         "- Length: EXACTLY 2–3 sentences. Short and punchy — every extra word "
         "weakens the joke. Stop after the 3rd sentence. "
         if mode == "No Filter"
-        else "- Length: EXACTLY 3–4 sentences. Stop after the 4th sentence. "
+        else "- Length: EXACTLY 3 sentences, and keep each sentence SHORT and readable. "
+        "No long run-on sentences that pile clause on clause. A reader should finish "
+        "the whole thing in a few seconds. Stop after the 3rd sentence. "
     )
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
@@ -154,6 +166,11 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"Additional rules:\n"
         f"- Be specific to THIS person's natal placements and TODAY's actual aspects.\n"
         f"- Never mention degree numbers (e.g. '15° Scorpio').\n"
+        f"- Mention AT MOST ONE astrological aspect in the whole reading, and in plain "
+        f"words. Do NOT list several transits — naming three or four planets/aspects turns "
+        f"the advice into a technical report. The reader wants guidance for their day, not "
+        f"an astrology lesson: lead with the real-life action, let the astrology stay in the "
+        f"background.\n"
         f"- Vary your sentence structure and opening words — never start two consecutive "
         f"readings the same way.\n"
         f"{length_rule}"
