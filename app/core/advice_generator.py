@@ -35,6 +35,41 @@ def _language_name(code: str) -> str:
     return {"en": "English", "ru": "Russian", "pt": "Portuguese (Brazilian)"}.get(code, "English")
 
 
+# Model routing (July 2026): gpt-5.6-luna matches/beats gpt-4o on grounded advice
+# across all modes & languages at ~1/10 the cost (verified: 3 blind rounds + a
+# 12-sample language-purity scan). Exception — No Filter's roast humor lands
+# sharper on gpt-4o, so that Pro mode stays on gpt-4o.
+_DEFAULT_MODEL = "gpt-5.6-luna"
+_MODEL_OVERRIDES = {"No Filter": "gpt-4o"}
+
+
+def _model_for_mode(mode: str) -> str:
+    return _MODEL_OVERRIDES.get(mode, _DEFAULT_MODEL)
+
+
+def _completion_kwargs(model: str, max_out: int, temperature: float) -> dict:
+    """GPT-5.x models require `max_completion_tokens` and reject a custom
+    temperature (fixed at 1); older models use `max_tokens` + temperature."""
+    if model.startswith("gpt-5"):
+        return {"model": model, "max_completion_tokens": max_out}
+    return {"model": model, "max_tokens": max_out, "temperature": temperature}
+
+
+# What made Luna's output win the blind tests: address by name + concrete,
+# no-filler sentences. Applied to every mode EXCEPT No Filter, whose prompt is
+# already tuned and runs on gpt-4o.
+_STYLE_ADDENDUM = (
+    "\n\nStyle (critical):\n"
+    "- Open by addressing the person by their first name, then a comma.\n"
+    "- Every sentence must name a real, doable action or a specific concrete "
+    "behavior — no filler, no vague uplift, no wellness clichés."
+)
+
+
+def _style_addendum(mode: str) -> str:
+    return "" if mode == "No Filter" else _STYLE_ADDENDUM
+
+
 def _format_aspects(transit_aspects: list[dict]) -> str:
     if not transit_aspects:
         return "no major exact transits today"
@@ -116,6 +151,7 @@ def _build_system_prompt(mode: str, language: str) -> str:
         f"readings the same way.\n"
         f"{length_rule}"
         f"No bullet points. No headers. No paragraph breaks. Plain prose only."
+        f"{_style_addendum(mode)}"
         f"{russian_block}"
     )
 
@@ -181,13 +217,11 @@ async def generate_category_text(
         category=category_label,
     )
     response = await client.chat.completions.create(
-        model="gpt-4o",
         messages=[
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        temperature=0.88,
-        max_tokens=400,
+        **_completion_kwargs(_model_for_mode(mode), max_out=600, temperature=0.88),
     )
     return response.choices[0].message.content.strip()
 
@@ -212,13 +246,12 @@ async def generate_theme(
         aspect_list=aspect_list,
     )
     response = await client.chat.completions.create(
-        model="gpt-4o",
         messages=[
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        temperature=0.82,
-        max_tokens=90,
+        # generous cap: gpt-5 models spend part of the budget on reasoning tokens
+        **_completion_kwargs(_model_for_mode(mode), max_out=400, temperature=0.82),
     )
     return response.choices[0].message.content.strip()
 
@@ -263,13 +296,11 @@ async def generate_weekly_text(
         f"Write this person's weekly forecast."
     )
     response = await client.chat.completions.create(
-        model="gpt-4o",
         messages=[
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        temperature=0.85,
-        max_tokens=500,
+        **_completion_kwargs(_model_for_mode(mode), max_out=700, temperature=0.85),
     )
     return response.choices[0].message.content.strip()
 
@@ -329,13 +360,12 @@ async def generate_compatibility_texts(
             f"Write the reading for: {sphere_desc}."
         )
         response = await client.chat.completions.create(
-            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user",   "content": user_msg},
             ],
-            temperature=0.85,
-            max_tokens=400,
+            # Compatibility has no "mode" — always the cheap default model.
+            **_completion_kwargs(_DEFAULT_MODEL, max_out=600, temperature=0.85),
         )
         return sphere_key, response.choices[0].message.content.strip()
 
