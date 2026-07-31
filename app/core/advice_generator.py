@@ -49,9 +49,16 @@ def _model_for_mode(mode: str) -> str:
 
 def _completion_kwargs(model: str, max_out: int, temperature: float) -> dict:
     """GPT-5.x models require `max_completion_tokens` and reject a custom
-    temperature (fixed at 1); older models use `max_tokens` + temperature."""
+    temperature (fixed at 1); older models use `max_tokens` + temperature.
+
+    `reasoning_effort="low"` is CRITICAL for gpt-5.x: at default effort the model
+    can spend the ENTIRE token budget on reasoning and return empty content
+    (finish_reason=length, 0 output tokens) — which surfaced as blank category
+    cells. Advice generation is a creative task, not a reasoning one, so low
+    effort both fixes the empties and cuts latency/cost. ("minimal" is rejected
+    by Luna; "low" is the floor.)"""
     if model.startswith("gpt-5"):
-        return {"model": model, "max_completion_tokens": max_out}
+        return {"model": model, "max_completion_tokens": max_out, "reasoning_effort": "low"}
     return {"model": model, "max_tokens": max_out, "temperature": temperature}
 
 
@@ -216,14 +223,24 @@ async def generate_category_text(
         moon_phase=moon_phase,
         category=category_label,
     )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user",   "content": user_msg},
+    ]
     response = await client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user_msg},
-        ],
-        **_completion_kwargs(_model_for_mode(mode), max_out=600, temperature=0.88),
+        messages=messages,
+        **_completion_kwargs(_model_for_mode(mode), max_out=1000, temperature=0.88),
     )
-    return response.choices[0].message.content.strip()
+    text = (response.choices[0].message.content or "").strip()
+    # Safety net: an empty category cell is unacceptable. If the model ever
+    # returns nothing (e.g. reasoning ate the budget), retry once on gpt-4o.
+    if not text:
+        response = await client.chat.completions.create(
+            messages=messages,
+            **_completion_kwargs("gpt-4o", max_out=400, temperature=0.88),
+        )
+        text = (response.choices[0].message.content or "").strip()
+    return text
 
 
 async def generate_theme(
@@ -245,15 +262,23 @@ async def generate_theme(
         moon_phase=moon_phase,
         aspect_list=aspect_list,
     )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user",   "content": user_msg},
+    ]
     response = await client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user_msg},
-        ],
-        # generous cap: gpt-5 models spend part of the budget on reasoning tokens
-        **_completion_kwargs(_model_for_mode(mode), max_out=400, temperature=0.82),
+        messages=messages,
+        # generous cap: gpt-5 reasoning tokens share this budget with the output
+        **_completion_kwargs(_model_for_mode(mode), max_out=700, temperature=0.82),
     )
-    return response.choices[0].message.content.strip()
+    text = (response.choices[0].message.content or "").strip()
+    if not text:  # never ship an empty theme — fall back to gpt-4o
+        response = await client.chat.completions.create(
+            messages=messages,
+            **_completion_kwargs("gpt-4o", max_out=90, temperature=0.82),
+        )
+        text = (response.choices[0].message.content or "").strip()
+    return text
 
 
 async def generate_weekly_text(
@@ -300,7 +325,7 @@ async def generate_weekly_text(
             {"role": "system", "content": system},
             {"role": "user",   "content": user_msg},
         ],
-        **_completion_kwargs(_model_for_mode(mode), max_out=700, temperature=0.85),
+        **_completion_kwargs(_model_for_mode(mode), max_out=1200, temperature=0.85),
     )
     return response.choices[0].message.content.strip()
 
@@ -365,7 +390,7 @@ async def generate_compatibility_texts(
                 {"role": "user",   "content": user_msg},
             ],
             # Compatibility has no "mode" — always the cheap default model.
-            **_completion_kwargs(_DEFAULT_MODEL, max_out=600, temperature=0.85),
+            **_completion_kwargs(_DEFAULT_MODEL, max_out=1000, temperature=0.85),
         )
         return sphere_key, response.choices[0].message.content.strip()
 
