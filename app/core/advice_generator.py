@@ -157,9 +157,9 @@ def _build_system_prompt(mode: str, language: str) -> str:
         "- Length: EXACTLY 2–3 sentences. Short and punchy — every extra word "
         "weakens the joke. Stop after the 3rd sentence. "
         if mode == "No Filter"
-        else "- Length: EXACTLY 3 sentences, and keep each sentence SHORT and readable. "
-        "No long run-on sentences that pile clause on clause. A reader should finish "
-        "the whole thing in a few seconds. Stop after the 3rd sentence. "
+        else "- Length: 3–4 sentences. Keep them readable — no long run-on sentences that "
+        "pile clause on clause, but give enough substance to feel worth reading. "
+        "Stop after the 4th sentence. "
     )
     return (
         f"You are {cfg.persona}, writing for the app Lumina Daily.\n\n"
@@ -220,6 +220,25 @@ _THEME_USER = (
 )
 
 
+def _score_directive(score: Optional[int]) -> str:
+    """Tell the model the computed 1–10 score so the words match the number the
+    user sees (was: score 4 'energy low' but text 'your energy is high')."""
+    if score is None:
+        return ""
+    if score <= 3:
+        tone = "a genuinely difficult, draining day in this area — be honest about that; do NOT claim things are great"
+    elif score <= 5:
+        tone = "a mixed, so-so day here — neither great nor terrible"
+    elif score <= 7:
+        tone = "a solid, favorable day in this area"
+    else:
+        tone = "an excellent, strong day in this area"
+    return (
+        f"\nThis life area scores {score}/10 today, meaning {tone}. "
+        f"Your reading's tone MUST match this number — never contradict it."
+    )
+
+
 async def generate_category_text(
     *,
     name: str,
@@ -232,6 +251,7 @@ async def generate_category_text(
     moon_phase: str,
     aspect_list: str,
     category_label: str,
+    score: Optional[int] = None,
 ) -> str:
     client = get_openai_client()
     system = _build_system_prompt(mode, language)
@@ -244,7 +264,7 @@ async def generate_category_text(
         aspect_list=aspect_list,
         moon_phase=moon_phase,
         category=category_label,
-    )
+    ) + _score_directive(score)
     messages = [
         {"role": "system", "content": system},
         {"role": "user",   "content": user_msg},
@@ -481,6 +501,12 @@ async def generate_all_advice(
     rising    = natal_chart.get("houses", {}).get("asc_sign", "unknown")
     aspect_list = _format_aspects(transit_aspects)
 
+    # Compute the SAME scores the app will display, so each reading's tone matches
+    # its number (score 4 "energy" must not say "your energy is high"). "risk"
+    # (Watch For) has no shown score, so no directive for it.
+    from app.core.scoring import score_categories
+    scores = score_categories(transit_aspects)
+
     theme_coro = generate_theme(
         sun_sign=sun_sign,
         moon_sign=moon_sign,
@@ -503,8 +529,9 @@ async def generate_all_advice(
             moon_phase=moon_phase,
             aspect_list=aspect_list,
             category_label=label,
+            score=None if key == "risk" else scores.get(key),
         )
-        for _, label in CATEGORIES
+        for key, label in CATEGORIES
     ]
 
     results = await asyncio.gather(theme_coro, *category_coros)
