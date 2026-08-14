@@ -55,6 +55,11 @@ async def redis_setnx(key: str, ttl: int, value: str) -> bool:
     return await r.set(key, value, nx=True, ex=ttl) is not None
 
 
+async def redis_delete(key: str) -> None:
+    r = get_redis()
+    await r.delete(key)
+
+
 async def close_redis() -> None:
     global _redis
     if _redis:

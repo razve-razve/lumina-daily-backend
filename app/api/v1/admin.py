@@ -94,6 +94,86 @@ async def clear_advice(user_id: str, x_admin_secret: str = Header(...)):
     return {"status": "cleared", "user_id": user_id, "date": str(today)}
 
 
+@router.get("/notif-status/{user_id}")
+async def notif_status(user_id: str, x_admin_secret: str = Header(...)):
+    """Diagnose why a single user is / isn't getting daily pushes.
+
+    Reports every condition the hourly notification job checks: timezone,
+    desired hour, current local hour, catch-up window, whether advice exists
+    for the user's local today, and whether the dedup lock is currently set.
+    """
+    _check_secret(x_admin_secret)
+    import uuid
+    from app.core.batch_job import (
+        _user_local_hour, _user_local_date, _DEFAULT_LOCAL_HOUR,
+    )
+    from app.db.repositories.profile_repository import get_profile_by_user_id
+    from app.db.repositories.advice_repository import get_advice
+    from app.services.redis_service import redis_get
+
+    uid = uuid.UUID(user_id)
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, uid)
+        profile = await get_profile_by_user_id(db, uid)
+        if not profile:
+            return {"error": "no profile for that user_id"}
+
+        tz_id = profile.device_timezone
+        local_hour = _user_local_hour(tz_id)
+        local_date = _user_local_date(tz_id)
+        desired = profile.notification_time.hour if profile.notification_time else _DEFAULT_LOCAL_HOUR
+        catchup = 6
+        in_window = desired <= local_hour <= desired + catchup
+
+        language = (user.language if user else None) or "en"
+        advice = await get_advice(db, uid, local_date, profile.interpretation_mode, language=language)
+
+        lock_key = f"notif_sent:{uid}:{local_date.isoformat()}"
+        lock = await redis_get(lock_key)
+
+    return {
+        "name": profile.name,
+        "has_token": bool(profile.fcm_token),
+        "device_timezone": tz_id or "NOT SET (defaults to UTC)",
+        "desired_hour_local": desired,
+        "current_local_hour": local_hour,
+        "local_date": str(local_date),
+        "in_send_window": in_window,
+        "window": f"{desired}:00 .. {desired + catchup}:00 local",
+        "interpretation_mode": profile.interpretation_mode,
+        "language": language,
+        "advice_exists_for_local_today": advice is not None,
+        "dedup_lock_set": lock is not None,
+        "dedup_lock_key": lock_key,
+        "verdict": (
+            "LOCK STUCK: lock is set but blocks resend — clear it to unblock"
+            if (lock is not None and advice is None) else
+            "NO ADVICE for local today — job skips push (and burns the lock)"
+            if advice is None else
+            "OK: would send inside window if lock not already set"
+        ),
+    }
+
+
+@router.delete("/notif-lock/{user_id}")
+async def clear_notif_lock(user_id: str, x_admin_secret: str = Header(...)):
+    """Clear today's dedup lock so the next hourly run can (re)send the push."""
+    _check_secret(x_admin_secret)
+    import uuid
+    from app.core.batch_job import _user_local_date
+    from app.db.repositories.profile_repository import get_profile_by_user_id
+    from app.services.redis_service import redis_delete
+
+    uid = uuid.UUID(user_id)
+    async with AsyncSessionLocal() as db:
+        profile = await get_profile_by_user_id(db, uid)
+        tz_id = profile.device_timezone if profile else None
+    local_date = _user_local_date(tz_id)
+    lock_key = f"notif_sent:{uid}:{local_date.isoformat()}"
+    await redis_delete(lock_key)
+    return {"status": "cleared", "lock_key": lock_key}
+
+
 @router.get("/debug")
 async def debug(x_admin_secret: str = Header(...)):
     """Show database state and APNs config for diagnosing notification issues."""
