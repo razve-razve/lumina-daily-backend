@@ -94,6 +94,65 @@ async def clear_advice(user_id: str, x_admin_secret: str = Header(...)):
     return {"status": "cleared", "user_id": user_id, "date": str(today)}
 
 
+@router.get("/token-health")
+async def token_health(x_admin_secret: str = Header(...)):
+    """Validate EVERY device token without disturbing users.
+
+    Sends a SILENT background push (content-available, no alert/sound) to each
+    profile's token and reports Apple's per-token status. 200 = token live,
+    410 = Unregistered (app deleted / token rotated — should be cleared),
+    400 BadDeviceToken = wrong environment. Nothing is shown on any device.
+    """
+    _check_secret(x_admin_secret)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Profile).where(Profile.fcm_token.isnot(None)))
+        profiles = list(result.scalars().all())
+        users = {u.id: u for u in (await db.execute(select(User))).scalars().all()}
+
+    if not profiles:
+        return {"status": "no device tokens in database"}
+
+    import httpx
+    from app.services.apns_service import _apns_base_url, _make_jwt
+    from app.config import settings as cfg
+
+    live, dead = 0, 0
+    results = []
+    for p in profiles:
+        email = users[p.user_id].email if p.user_id in users else None
+        try:
+            jwt_token = _make_jwt()
+            url = f"{_apns_base_url()}/3/device/{p.fcm_token}"
+            headers = {
+                "authorization": f"bearer {jwt_token}",
+                "apns-topic": cfg.apns_bundle_id,
+                "apns-push-type": "background",   # silent — not shown to the user
+                "apns-priority": "5",             # required for background pushes
+            }
+            payload = {"aps": {"content-available": 1}}
+            async with httpx.AsyncClient(http2=True, timeout=10) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            ok = resp.status_code == 200
+            live += 1 if ok else 0
+            dead += 0 if ok else 1
+            results.append({
+                "name": p.name,
+                "email": email,
+                "status": resp.status_code,
+                "reason": "live" if ok else (resp.text or "unknown"),
+            })
+        except Exception as e:
+            dead += 1
+            results.append({"name": p.name, "email": email, "status": "error", "reason": str(e)})
+
+    return {
+        "summary": {"total": len(profiles), "live": live, "dead": dead},
+        "apns_url": _apns_base_url(),
+        "results": results,
+    }
+
+
 @router.get("/notif-status/{user_id}")
 async def notif_status(user_id: str, x_admin_secret: str = Header(...)):
     """Diagnose why a single user is / isn't getting daily pushes.

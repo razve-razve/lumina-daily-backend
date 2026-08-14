@@ -30,7 +30,7 @@ from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.db.repositories.user_repository import get_all_active_users
 from app.db.session import AsyncSessionLocal
 from app.services.apns_service import send_daily_notification
-from app.services.redis_service import cache_advice, get_cached_advice, redis_setnx
+from app.services.redis_service import cache_advice, get_cached_advice, redis_delete, redis_setnx
 
 logger = logging.getLogger(__name__)
 
@@ -232,10 +232,24 @@ async def run_notification_job() -> None:
             if not (desired_hour <= current_local_hour <= desired_hour + _CATCHUP_HOURS):
                 continue
 
-            # --- Duplicate-send guard (atomic Redis lock) ---
-            # Key is per-DAY (not per-hour) so catch-up runs can't double-send:
-            # once today's push goes out, every later run this day sees the lock.
             user_today = _user_local_date(tz_id)
+
+            # Look up advice for the user's LOCAL today BEFORE touching the lock.
+            # If it's not ready yet, skip WITHOUT claiming the lock so a later
+            # hourly run still delivers once the advice exists (previously the
+            # lock was claimed first, so a missing-advice run burned the day).
+            language = user.language or "en"
+            existing = await get_advice(db, user.id, user_today, profile.interpretation_mode, language=language)
+            if not existing:
+                logger.info(
+                    f"No advice for user {user.id} on local date {user_today} — skipping push (lock untouched)"
+                )
+                continue
+
+            # --- Duplicate-send guard (atomic Redis lock) ---
+            # Key is per-DAY (not per-hour) so catch-up runs can't double-send.
+            # Claimed only now that we're actually about to send; if two Railway
+            # instances fire together, only the SET-NX winner proceeds.
             lock_key = f"notif_sent:{user.id}:{user_today.isoformat()}"
             claimed = await redis_setnx(lock_key, ttl=72000, value="1")  # 20-hour TTL
             if not claimed:
@@ -243,14 +257,6 @@ async def run_notification_job() -> None:
                 logger.info(f"Skipping duplicate push for user {user.id} (already sent today)")
                 continue
 
-            # Look up advice for the user's LOCAL today
-            language = user.language or "en"
-            existing = await get_advice(db, user.id, user_today, profile.interpretation_mode, language=language)
-            if not existing:
-                logger.info(
-                    f"No advice for user {user.id} on local date {user_today} — skipping push"
-                )
-                continue
             success = await send_daily_notification(
                 profile.fcm_token,
                 language,
@@ -268,6 +274,14 @@ async def run_notification_job() -> None:
                 logger.info(
                     f"Push sent → user {user.id} | local {desired_hour:02d}:00 "
                     f"({tz_id or 'UTC'}) | date {user_today}"
+                )
+            else:
+                # Send failed (bad token, transient APNs error, etc.) — release
+                # the lock so the next hourly run inside the window retries
+                # instead of silently burning the whole day.
+                await redis_delete(lock_key)
+                logger.warning(
+                    f"Push FAILED for user {user.id} — lock released for retry next hour"
                 )
 
     logger.info(f"Notification job done — {sent} notifications sent")
