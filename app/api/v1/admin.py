@@ -28,12 +28,24 @@ async def trigger_batch(x_admin_secret: str = Header(...)):
 
 
 @router.post("/test-push")
-async def test_push(x_admin_secret: str = Header(...)):
-    """Send a test push notification to all profiles that have a device token."""
+async def test_push(x_admin_secret: str = Header(...), user_id: str | None = None):
+    """Send a test push notification.
+
+    By default targets every profile with a device token. Pass ?user_id=<uuid>
+    to send to ONLY that one user's device — used for diagnosing a single
+    device without notifying real users.
+    """
     _check_secret(x_admin_secret)
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Profile).where(Profile.fcm_token.isnot(None)))
+        query = select(Profile).where(Profile.fcm_token.isnot(None))
+        if user_id:
+            import uuid
+            try:
+                query = query.where(Profile.user_id == uuid.UUID(user_id))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="user_id must be a valid UUID")
+        result = await db.execute(query)
         profiles = list(result.scalars().all())
 
     if not profiles:
