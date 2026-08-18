@@ -120,7 +120,9 @@ async def score_preview(user_id: str, date: str | None = None, x_admin_secret: s
     import uuid
     from datetime import datetime, timezone
     import swisseph as swe
-    from app.core.ephemeris import calculate_current_transits, calculate_transit_aspects_to_natal
+    from app.core.ephemeris import (
+        calculate_current_transits, calculate_transit_aspects_to_natal, julian_day_for_local_noon,
+    )
     from app.core.scoring import score_categories
     from app.db.repositories.profile_repository import get_profile_by_user_id
 
@@ -131,26 +133,27 @@ async def score_preview(user_id: str, date: str | None = None, x_admin_secret: s
         return {"error": "no profile"}
     natal_planets = (profile.natal_chart_json or {}).get("planets", {})
 
+    def scores_at(jd: float) -> dict:
+        aspects = calculate_transit_aspects_to_natal(calculate_current_transits(jd), natal_planets)
+        s = score_categories(aspects)
+        s["day_avg"] = round((s["love"] + s["work"] + s["energy"] + s["communication"] + s["mood"]) / 5)
+        return s
+
     rows = []
     for hour in (0, 3, 6, 9, 12, 15, 18, 21):
-        jd = swe.julday(d.year, d.month, d.day, float(hour))
-        transits = calculate_current_transits(jd)
-        aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
-        s = score_categories(aspects)
-        day_avg = round((s["love"] + s["work"] + s["energy"] + s["communication"] + s["mood"]) / 5)
-        rows.append({
-            "utc_hour": hour,
-            "day_avg": day_avg,
-            "love": s["love"], "work": s["work"], "energy": s["energy"],
-            "communication": s["communication"], "mood": s["mood"],
-            "anchor": "★ noon UTC (used)" if hour == 12 else "",
-        })
+        s = scores_at(swe.julday(d.year, d.month, d.day, float(hour)))
+        rows.append({"utc_hour": hour, **s})
+
+    # The anchor actually used to score this day: the user's LOCAL noon.
+    anchor = scores_at(julian_day_for_local_noon(d, profile.device_timezone))
     day_avgs = [r["day_avg"] for r in rows]
     return {
         "date": str(d),
-        "day_avg_range": {"min": min(day_avgs), "max": max(day_avgs)},
-        "note": "day_avg naturally swings by hour (Moon moves ~0.5°/h). Noon UTC (hour 12) is the fixed anchor.",
-        "hourly": rows,
+        "device_timezone": profile.device_timezone or "UTC",
+        "anchor_used": {"local_noon": True, **anchor},
+        "day_avg_range_across_utc_hours": {"min": min(day_avgs), "max": max(day_avgs)},
+        "note": "Scores drift by hour (Moon ~0.5°/h). 'anchor_used' = the user's local noon — the value the app now stores.",
+        "hourly_utc": rows,
     }
 
 

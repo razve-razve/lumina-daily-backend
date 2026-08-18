@@ -21,7 +21,7 @@ from app.core.ephemeris import (
     calculate_current_transits,
     calculate_transit_aspects_to_natal,
     get_moon_phase,
-    julian_day_for_date,
+    julian_day_for_local_noon,
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice
@@ -93,10 +93,12 @@ async def _process_user(
     natal_chart = profile.natal_chart_json
     natal_planets = natal_chart.get("planets", {})
 
-    # Anchor transits to NOON UTC of target_date so scores depend only on the
-    # date — identical across languages and stable all day (not on the minute
-    # of generation). Computed per-date since users span timezones.
-    jd_anchor = await asyncio.get_event_loop().run_in_executor(None, julian_day_for_date, target_date)
+    # Anchor transits to the user's LOCAL noon of target_date so scores depend
+    # only on the date — identical across languages, stable all day, and sampled
+    # in the middle of the user's own day (not the minute of generation).
+    jd_anchor = await asyncio.get_event_loop().run_in_executor(
+        None, julian_day_for_local_noon, target_date, profile.device_timezone
+    )
     transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_anchor)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
         None, calculate_transit_aspects_to_natal, transits, natal_planets

@@ -175,17 +175,30 @@ def now_julian_day() -> float:
     return swe.julday(now.year, now.month, now.day, decimal_hour)
 
 
-def julian_day_for_date(target_date) -> float:
-    """JD anchored to NOON UTC on target_date.
+def julian_day_for_local_noon(target_date, tz_id: str | None = None) -> float:
+    """JD anchored to 12:00 LOCAL time on target_date (in tz_id; UTC if unset).
 
     Daily scores must depend only on the calendar date — not on the minute the
     advice happens to be generated. Anchoring to a fixed noon makes a day's
     scores identical across languages and stable all day (the fast Moon moves
-    ~0.5°/hour, so 'now' otherwise drifts the scores). Matches the anchor
-    already used by the weekly forecast and moon-phase calculations.
+    ~0.5°/hour, so 'now' otherwise drifts the scores).
+
+    LOCAL noon (not UTC noon) so the sample sits in the MIDDLE of the user's own
+    day. UTC noon lands at a different point of each user's day depending on
+    their offset — fine near UTC, but e.g. 10pm for Sydney (UTC+10), which would
+    score their night instead of their day.
     """
     swe.set_ephe_path(settings.ephe_path)
-    return swe.julday(target_date.year, target_date.month, target_date.day, 12.0)
+    from datetime import datetime, timezone as _tz
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_id) if tz_id else _tz.utc
+    except Exception:
+        tz = _tz.utc
+    local_noon = datetime(target_date.year, target_date.month, target_date.day, 12, 0, tzinfo=tz)
+    u = local_noon.astimezone(_tz.utc)
+    decimal_hour = u.hour + u.minute / 60.0 + u.second / 3600.0
+    return swe.julday(u.year, u.month, u.day, decimal_hour)
 
 
 _MOON_PHASES = [

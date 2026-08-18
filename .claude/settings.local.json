@@ -70,7 +70,11 @@
       "Bash(find ~/Desktop -maxdepth 2 -name Simulator*)",
       "Read(//Users/Arseniy/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/194974cb-39b5-4935-bb4f-98eea30b5e2f/bc830516-d68d-4bae-9c4d-5d66c8ad6a86/skills/docx/**)",
       "Bash(pandoc \"/Users/Arseniy/Desktop/lumina daily/Feedback 120426.docx\" -t plain)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(python3 -c \"from datetime import time; h, m = map\\(int, '25:30'.split\\(':'\\)\\); print\\(time\\(h, m\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Fix forced logouts: JWKS retry + startup pre-warm *)",
+      "Bash(git push *)"
     ]
   }
 }

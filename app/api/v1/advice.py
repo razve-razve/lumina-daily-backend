@@ -16,7 +16,7 @@ from app.core.ephemeris import (
     calculate_transit_aspects_to_natal,
     get_moon_phase,
     get_moon_phase_for_date,
-    julian_day_for_date,
+    julian_day_for_local_noon,
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice, User
@@ -68,10 +68,12 @@ async def _generate_and_store(
     natal_chart = profile.natal_chart_json
     natal_planets = natal_chart.get("planets", {})
 
-    # Anchor to NOON UTC of the target date so scores depend only on the date,
-    # not the minute of generation — otherwise the same day yields different
-    # scores per language (each generated at a different time). See ephemeris.
-    jd_anchor = await asyncio.get_event_loop().run_in_executor(None, julian_day_for_date, target_date)
+    # Anchor to the user's LOCAL noon of the target date so scores depend only
+    # on the date (not the minute of generation — otherwise the same day yields
+    # different scores per language) and sit in the middle of the user's day.
+    jd_anchor = await asyncio.get_event_loop().run_in_executor(
+        None, julian_day_for_local_noon, target_date, profile.device_timezone
+    )
     transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_anchor)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
         None, calculate_transit_aspects_to_natal, transits, natal_planets
@@ -231,7 +233,9 @@ async def get_weekly_forecast(
         best_aspects: dict[str, dict] = {}
         for i in range(7):
             d = week_start + timedelta(days=i)
-            jd = swe.julday(d.year, d.month, d.day, 12.0)
+            # Local noon of each day — same anchor as the daily card, so a day's
+            # weekly bar matches its daily score.
+            jd = julian_day_for_local_noon(d, profile.device_timezone)
             transits = calculate_current_transits(jd)
             aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
             scores = score_categories(aspects)
