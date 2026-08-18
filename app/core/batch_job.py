@@ -21,7 +21,7 @@ from app.core.ephemeris import (
     calculate_current_transits,
     calculate_transit_aspects_to_natal,
     get_moon_phase,
-    now_julian_day,
+    julian_day_for_date,
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice
@@ -72,7 +72,6 @@ async def _process_user(
     profile,
     user_id,
     language: str,
-    transits: dict,
     target_date: date,
     db: AsyncSession,
 ) -> None:
@@ -94,6 +93,11 @@ async def _process_user(
     natal_chart = profile.natal_chart_json
     natal_planets = natal_chart.get("planets", {})
 
+    # Anchor transits to NOON UTC of target_date so scores depend only on the
+    # date — identical across languages and stable all day (not on the minute
+    # of generation). Computed per-date since users span timezones.
+    jd_anchor = await asyncio.get_event_loop().run_in_executor(None, julian_day_for_date, target_date)
+    transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_anchor)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
         None, calculate_transit_aspects_to_natal, transits, natal_planets
     )
@@ -149,10 +153,8 @@ async def run_advice_job() -> None:
     """
     logger.info("Advice job started")
 
-    # Compute shared planetary positions once (good enough for hourly precision)
-    jd_now = await asyncio.get_event_loop().run_in_executor(None, now_julian_day)
-    transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_now)
-
+    # Transits are computed per-user inside _process_user, anchored to NOON UTC
+    # of each user's local date — so scores are date-stable and language-agnostic.
     async with AsyncSessionLocal() as db:
         users = await get_all_active_users(db)
         logger.info(f"Advice job: {len(users)} users to check")
@@ -167,7 +169,7 @@ async def run_advice_job() -> None:
                     continue
                 user_today = _user_local_date(profile.device_timezone)
                 tasks.append(
-                    _process_user(profile, u.id, u.language or "en", transits, user_today, db)
+                    _process_user(profile, u.id, u.language or "en", user_today, db)
                 )
 
             if not tasks:

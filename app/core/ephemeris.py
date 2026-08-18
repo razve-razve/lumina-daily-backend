@@ -175,6 +175,19 @@ def now_julian_day() -> float:
     return swe.julday(now.year, now.month, now.day, decimal_hour)
 
 
+def julian_day_for_date(target_date) -> float:
+    """JD anchored to NOON UTC on target_date.
+
+    Daily scores must depend only on the calendar date — not on the minute the
+    advice happens to be generated. Anchoring to a fixed noon makes a day's
+    scores identical across languages and stable all day (the fast Moon moves
+    ~0.5°/hour, so 'now' otherwise drifts the scores). Matches the anchor
+    already used by the weekly forecast and moon-phase calculations.
+    """
+    swe.set_ephe_path(settings.ephe_path)
+    return swe.julday(target_date.year, target_date.month, target_date.day, 12.0)
+
+
 _MOON_PHASES = [
     (45,  "Waxing Crescent"),
     (90,  "First Quarter"),

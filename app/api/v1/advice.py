@@ -16,7 +16,7 @@ from app.core.ephemeris import (
     calculate_transit_aspects_to_natal,
     get_moon_phase,
     get_moon_phase_for_date,
-    now_julian_day,
+    julian_day_for_date,
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice, User
@@ -68,8 +68,11 @@ async def _generate_and_store(
     natal_chart = profile.natal_chart_json
     natal_planets = natal_chart.get("planets", {})
 
-    jd_now = await asyncio.get_event_loop().run_in_executor(None, now_julian_day)
-    transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_now)
+    # Anchor to NOON UTC of the target date so scores depend only on the date,
+    # not the minute of generation — otherwise the same day yields different
+    # scores per language (each generated at a different time). See ephemeris.
+    jd_anchor = await asyncio.get_event_loop().run_in_executor(None, julian_day_for_date, target_date)
+    transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_anchor)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
         None, calculate_transit_aspects_to_natal, transits, natal_planets
     )
