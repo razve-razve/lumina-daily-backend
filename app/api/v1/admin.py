@@ -83,15 +83,29 @@ async def test_push(x_admin_secret: str = Header(...), user_id: str | None = Non
 
 @router.delete("/clear-advice/{user_id}")
 async def clear_advice(user_id: str, x_admin_secret: str = Header(...)):
-    """Delete all today's advice for a user so it regenerates fresh."""
+    """Delete today's advice for a user (DB + Redis) so it regenerates fresh.
+
+    Must clear BOTH stores: /today caches the full advice in Redis for 24h, so
+    deleting only the DB row would still serve the stale cached copy.
+    """
     _check_secret(x_admin_secret)
     import uuid
     from datetime import datetime, timezone
     from app.db.repositories.advice_repository import delete_all_today_advice
+    from app.services.redis_service import delete_cached_advice
+    from app.core.modes import MODES
+
     today = datetime.now(timezone.utc).date()
+    uid = uuid.UUID(user_id)
     async with AsyncSessionLocal() as db:
-        await delete_all_today_advice(db, uuid.UUID(user_id), today)
-    return {"status": "cleared", "user_id": user_id, "date": str(today)}
+        await delete_all_today_advice(db, uid, today)
+
+    # Purge the Redis cache across every mode × language for today.
+    for mode in MODES.keys():
+        for lang in ("en", "ru", "pt"):
+            await delete_cached_advice(str(uid), today.isoformat(), mode, language=lang)
+
+    return {"status": "cleared (db + redis)", "user_id": user_id, "date": str(today)}
 
 
 @router.get("/token-health")
