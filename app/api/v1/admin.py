@@ -108,6 +108,52 @@ async def clear_advice(user_id: str, x_admin_secret: str = Header(...)):
     return {"status": "cleared (db + redis)", "user_id": user_id, "date": str(today)}
 
 
+@router.get("/score-preview/{user_id}")
+async def score_preview(user_id: str, date: str | None = None, x_admin_secret: str = Header(...)):
+    """Show a user's category scores computed at several hours of a date.
+
+    Read-only (no writes). Demonstrates how much the day's scores drift by hour
+    (the fast Moon), so you can see the noon-UTC anchor is a representative
+    sample, not an anomalous low. `date` = YYYY-MM-DD (default: today UTC).
+    """
+    _check_secret(x_admin_secret)
+    import uuid
+    from datetime import datetime, timezone
+    import swisseph as swe
+    from app.core.ephemeris import calculate_current_transits, calculate_transit_aspects_to_natal
+    from app.core.scoring import score_categories
+    from app.db.repositories.profile_repository import get_profile_by_user_id
+
+    d = datetime.strptime(date, "%Y-%m-%d").date() if date else datetime.now(timezone.utc).date()
+    async with AsyncSessionLocal() as db:
+        profile = await get_profile_by_user_id(db, uuid.UUID(user_id))
+    if not profile:
+        return {"error": "no profile"}
+    natal_planets = (profile.natal_chart_json or {}).get("planets", {})
+
+    rows = []
+    for hour in (0, 3, 6, 9, 12, 15, 18, 21):
+        jd = swe.julday(d.year, d.month, d.day, float(hour))
+        transits = calculate_current_transits(jd)
+        aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
+        s = score_categories(aspects)
+        day_avg = round((s["love"] + s["work"] + s["energy"] + s["communication"] + s["mood"]) / 5)
+        rows.append({
+            "utc_hour": hour,
+            "day_avg": day_avg,
+            "love": s["love"], "work": s["work"], "energy": s["energy"],
+            "communication": s["communication"], "mood": s["mood"],
+            "anchor": "★ noon UTC (used)" if hour == 12 else "",
+        })
+    day_avgs = [r["day_avg"] for r in rows]
+    return {
+        "date": str(d),
+        "day_avg_range": {"min": min(day_avgs), "max": max(day_avgs)},
+        "note": "day_avg naturally swings by hour (Moon moves ~0.5°/h). Noon UTC (hour 12) is the fixed anchor.",
+        "hourly": rows,
+    }
+
+
 @router.get("/token-health")
 async def token_health(x_admin_secret: str = Header(...)):
     """Validate EVERY device token without disturbing users.
