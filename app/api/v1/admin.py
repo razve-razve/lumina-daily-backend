@@ -157,6 +157,38 @@ async def score_preview(user_id: str, date: str | None = None, x_admin_secret: s
     }
 
 
+@router.get("/preview-fallback/{user_id}")
+async def preview_fallback(user_id: str, branch: str | None = None, x_admin_secret: str = Header(...)):
+    """Preview what /today serves when generation is down: the most recent real
+    reading if any, else the calm placeholder. `?branch=placeholder` forces the
+    placeholder preview. Read-only, no AI, no writes."""
+    _check_secret(x_admin_secret)
+    import uuid
+    from app.api.v1.advice import _placeholder_response, _to_response
+    from app.core.batch_job import _user_local_date
+    from app.db.repositories.advice_repository import get_recent_advice
+    from app.db.repositories.profile_repository import get_profile_by_user_id
+
+    uid = uuid.UUID(user_id)
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, uid)
+        profile = await get_profile_by_user_id(db, uid)
+        if not profile:
+            return {"error": "no profile"}
+        lang = (user.language if user else None) or "en"
+        mode = profile.interpretation_mode
+        today = _user_local_date(profile.device_timezone)
+
+        if branch == "placeholder":
+            resp, which = _placeholder_response(profile, today, mode, lang), "placeholder"
+        else:
+            recent = await get_recent_advice(db, uid, mode, limit=7)
+            chosen = next((a for a in recent if a.language == lang), None) or (recent[0] if recent else None)
+            which = "recent_reading" if chosen is not None else "placeholder"
+            resp = _to_response(chosen) if chosen is not None else _placeholder_response(profile, today, mode, lang)
+    return {"branch_that_would_serve": which, "language": lang, "response": resp.model_dump(mode="json")}
+
+
 @router.get("/test-generate/{user_id}")
 async def test_generate(user_id: str, x_admin_secret: str = Header(...)):
     """Run the full advice generation for one user and return the exact error

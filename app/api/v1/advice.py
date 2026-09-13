@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,13 +21,77 @@ from app.core.ephemeris import (
 )
 from app.core.scoring import build_transit_tags, score_categories
 from app.db.models import DailyAdvice, User
-from app.db.repositories.advice_repository import create_advice, get_advice, get_advice_range
+from app.db.repositories.advice_repository import create_advice, get_advice, get_advice_range, get_recent_advice
 from app.db.repositories.profile_repository import get_profile_by_user_id
 from app.dependencies import get_current_user, get_db
 from app.schemas.advice import CategoryCard, DailyAdviceResponse
 from app.services.redis_service import cache_advice, get_cached_advice, redis_get, redis_setex
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+# Warm, on-brand fallback copy shown only when live generation is temporarily
+# unavailable (e.g. an upstream AI outage) AND the user has no recent reading
+# to fall back to. Scores/moon/tags stay REAL (computed locally) — only the
+# words are these calm placeholders. Kept short and human, not error-y.
+_PLACEHOLDER_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "theme": "The sky is turning quietly today. Your full reading is on its way back — take this as a gentle pause.",
+        "love": "Let warmth lead, without forcing anything into words just yet.",
+        "work": "Steady, unhurried effort carries you further than a sprint today.",
+        "energy": "Move at your own pace — there's nothing to prove right now.",
+        "communication": "Say a little less, listen a little more; the right words will find their moment.",
+        "mood": "Give yourself a soft, ordinary kind of day.",
+        "watch_for": "Your reading is refreshing behind the scenes — check back shortly for today's full detail.",
+    },
+    "ru": {
+        "theme": "Небо сегодня разворачивается неспешно. Полное чтение уже возвращается — примите это как тихую паузу.",
+        "love": "Пусть ведёт тепло — не спешите облекать всё в слова.",
+        "work": "Спокойные, размеренные усилия сегодня надёжнее рывка.",
+        "energy": "Двигайтесь в своём темпе — сейчас никому ничего не нужно доказывать.",
+        "communication": "Говорите чуть меньше, слушайте чуть больше — нужные слова найдут свой момент.",
+        "mood": "Позвольте себе обычный, спокойный день.",
+        "watch_for": "Чтение обновляется — загляните чуть позже за полными деталями дня.",
+    },
+    "pt": {
+        "theme": "O céu se move devagar hoje. Sua leitura completa já está a caminho — receba isto como uma pausa tranquila.",
+        "love": "Deixe o carinho conduzir, sem forçar nada em palavras ainda.",
+        "work": "Um esforço calmo e constante leva você mais longe que a pressa hoje.",
+        "energy": "Vá no seu ritmo — não é preciso provar nada agora.",
+        "communication": "Fale um pouco menos, escute um pouco mais; as palavras certas acharão o momento.",
+        "mood": "Permita-se um dia comum e suave.",
+        "watch_for": "Sua leitura está sendo atualizada — volte em breve para os detalhes completos do dia.",
+    },
+}
+
+
+def _placeholder_response(profile, today: date, mode: str, lang: str) -> DailyAdviceResponse:
+    """A calm 200 response for when generation is down and the user has no
+    recent reading. Scores, moon phase and transit tags are REAL (no AI needed);
+    only the text is a gentle placeholder. Never cached, so the next request
+    retries real generation once the upstream recovers."""
+    natal_planets = (profile.natal_chart_json or {}).get("planets", {})
+    jd = julian_day_for_local_noon(today, profile.device_timezone)
+    transits = calculate_current_transits(jd)
+    aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
+    scores = score_categories(aspects)
+    t = _PLACEHOLDER_TEXT.get(lang, _PLACEHOLDER_TEXT["en"])
+    return DailyAdviceResponse(
+        date=today,
+        generated_at=datetime.now(timezone.utc),
+        mode=mode,
+        theme=t["theme"],
+        moon_phase=get_moon_phase(transits),
+        transit_tags=build_transit_tags(aspects, transits),
+        love=CategoryCard(score=scores["love"], text=t["love"]),
+        work=CategoryCard(score=scores["work"], text=t["work"]),
+        energy=CategoryCard(score=scores["energy"], text=t["energy"]),
+        communication=CategoryCard(score=scores["communication"], text=t["communication"]),
+        mood=CategoryCard(score=scores["mood"], text=t["mood"]),
+        watch_for=t["watch_for"],
+    )
 
 
 def _user_local_date(device_timezone: str | None) -> date:
@@ -157,11 +222,31 @@ async def get_today_advice(
         await cache_advice(str(user_id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
         return response
 
-    # 3. Generate fresh in the user's current language
-    advice = await _generate_and_store(profile, user_id, lang, today, db)
-    response = _to_response(advice)
-    await cache_advice(str(user_id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
-    return response
+    # 3. Generate fresh in the user's current language.
+    #    If generation is temporarily unavailable (e.g. an upstream AI outage),
+    #    degrade gracefully instead of returning a 500 red-error screen:
+    #      a) serve the user's most recent real reading (nearly invisible for
+    #         active users — they read daily, so yesterday's exists), or
+    #      b) a calm placeholder with REAL scores if they have no history.
+    #    Neither fallback is cached, so the next request retries real generation
+    #    once the upstream recovers.
+    try:
+        advice = await _generate_and_store(profile, user_id, lang, today, db)
+        response = _to_response(advice)
+        await cache_advice(str(user_id), today.isoformat(), mode, {"advice": response.model_dump(mode="json")}, language=lang)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Advice generation failed for user {user_id} — serving graceful fallback ({type(e).__name__}: {e})")
+        try:
+            recent = await get_recent_advice(db, user_id, mode, limit=7)
+            fallback = next((a for a in recent if a.language == lang), None) or (recent[0] if recent else None)
+        except Exception:
+            fallback = None  # session may be poisoned — fall through to placeholder (no DB)
+        if fallback is not None:
+            return _to_response(fallback)
+        return _placeholder_response(profile, today, mode, lang)
 
 
 @router.get("/date", response_model=DailyAdviceResponse)
