@@ -157,6 +157,54 @@ async def score_preview(user_id: str, date: str | None = None, x_admin_secret: s
     }
 
 
+@router.get("/test-generate/{user_id}")
+async def test_generate(user_id: str, x_admin_secret: str = Header(...)):
+    """Run the full advice generation for one user and return the exact error
+    if it fails. Diagnostic for 500s on /today. Does NOT store anything."""
+    _check_secret(x_admin_secret)
+    import uuid, traceback
+    from datetime import datetime, timezone
+    from app.core.ephemeris import (
+        calculate_current_transits, calculate_transit_aspects_to_natal,
+        get_moon_phase, julian_day_for_local_noon,
+    )
+    from app.core.scoring import score_categories
+    from app.core.advice_generator import generate_all_advice
+    from app.db.repositories.profile_repository import get_profile_by_user_id
+
+    try:
+        uid = uuid.UUID(user_id)
+        async with AsyncSessionLocal() as db:
+            user = await db.get(User, uid)
+            profile = await get_profile_by_user_id(db, uid)
+        if not profile:
+            return {"error": "no profile"}
+
+        target_date = datetime.now(timezone.utc).date()
+        natal_chart = profile.natal_chart_json
+        natal_planets = natal_chart.get("planets", {})
+        jd = julian_day_for_local_noon(target_date, profile.device_timezone)
+        transits = calculate_current_transits(jd)
+        transit_aspects = calculate_transit_aspects_to_natal(transits, natal_planets)
+        scores = score_categories(transit_aspects)
+        moon_phase = get_moon_phase(transits)
+        language = (user.language if user else None) or "en"
+
+        texts = await generate_all_advice(
+            name=profile.name, gender=profile.gender, language=language,
+            mode=profile.interpretation_mode, natal_chart=natal_chart,
+            transit_aspects=transit_aspects, moon_phase=moon_phase,
+        )
+        return {
+            "ok": True, "language": language, "mode": profile.interpretation_mode,
+            "scores": scores, "text_keys": list(texts.keys()),
+            "theme_preview": texts.get("theme", "")[:120],
+        }
+    except Exception as e:
+        return {"ok": False, "error_type": type(e).__name__, "error": str(e),
+                "traceback": traceback.format_exc()[-2000:]}
+
+
 @router.get("/token-health")
 async def token_health(x_admin_secret: str = Header(...)):
     """Validate EVERY device token without disturbing users.
