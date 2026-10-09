@@ -68,36 +68,39 @@ def _user_local_hour(device_timezone: str | None) -> int:
 # Per-user advice generation
 # ---------------------------------------------------------------------------
 
-async def _process_user(
-    profile,
-    user_id,
-    language: str,
-    target_date: date,
-    db: AsyncSession,
-) -> None:
-    """Generate advice for a user for target_date (their local today).
-    No-ops if advice already exists in cache or DB."""
-    mode = profile.interpretation_mode
+async def _process_user(user_id, language: str) -> None:
+    """Generate advice for a user for their local today.
+    No-ops if advice already exists in cache or DB.
 
-    # Redis cache check (cheap)
-    cached = await get_cached_advice(str(user_id), target_date.isoformat(), mode, language=language)
-    if cached:
-        return
+    Opens its OWN short-lived DB sessions — it is run concurrently via
+    asyncio.gather, and asyncpg connections are NOT safe for concurrent use, so
+    a shared session across gathered tasks corrupts the connection ("cannot use
+    Connection.transaction() in a manually started transaction") and poisons the
+    pool. No DB connection is held across the slow OpenAI call."""
+    # --- Session 1: read profile + existence checks (short-lived) ---
+    async with AsyncSessionLocal() as db:
+        profile = await get_profile_by_user_id(db, user_id)
+        if not profile:
+            return
+        mode = profile.interpretation_mode
+        tz = profile.device_timezone
+        name = profile.name
+        gender = profile.gender
+        natal_chart = profile.natal_chart_json
+        target_date = _user_local_date(tz)
 
-    # DB check
-    existing = await get_advice(db, user_id, target_date, mode, language=language)
-    if existing:
-        await cache_advice(str(user_id), target_date.isoformat(), mode, {"cached": True}, language=language)
-        return
+        cached = await get_cached_advice(str(user_id), target_date.isoformat(), mode, language=language)
+        if cached:
+            return
+        existing = await get_advice(db, user_id, target_date, mode, language=language)
+        if existing:
+            await cache_advice(str(user_id), target_date.isoformat(), mode, {"cached": True}, language=language)
+            return
 
-    natal_chart = profile.natal_chart_json
-    natal_planets = natal_chart.get("planets", {})
-
-    # Anchor transits to the user's LOCAL noon of target_date so scores depend
-    # only on the date — identical across languages, stable all day, and sampled
-    # in the middle of the user's own day (not the minute of generation).
+    # --- Heavy work with NO DB connection held (ephemeris + OpenAI) ---
+    natal_planets = (natal_chart or {}).get("planets", {})
     jd_anchor = await asyncio.get_event_loop().run_in_executor(
-        None, julian_day_for_local_noon, target_date, profile.device_timezone
+        None, julian_day_for_local_noon, target_date, tz
     )
     transits = await asyncio.get_event_loop().run_in_executor(None, calculate_current_transits, jd_anchor)
     transit_aspects = await asyncio.get_event_loop().run_in_executor(
@@ -108,8 +111,8 @@ async def _process_user(
     transit_tags = build_transit_tags(transit_aspects, transits)
 
     texts = await generate_all_advice(
-        name=profile.name,
-        gender=profile.gender,
+        name=name,
+        gender=gender,
         language=language,
         mode=mode,
         natal_chart=natal_chart,
@@ -138,9 +141,11 @@ async def _process_user(
         risk_text=texts["risk_text"],
     )
 
-    await create_advice(db, advice)
+    # --- Session 2: write (short-lived) ---
+    async with AsyncSessionLocal() as db:
+        await create_advice(db, advice)
     await cache_advice(str(user_id), target_date.isoformat(), mode, {"cached": True}, language=language)
-    logger.info(f"Generated advice for user {user_id} — local date {target_date} ({profile.device_timezone or 'UTC'})")
+    logger.info(f"Generated advice for user {user_id} — local date {target_date} ({tz or 'UTC'})")
 
 
 # ---------------------------------------------------------------------------
@@ -155,32 +160,22 @@ async def run_advice_job() -> None:
     """
     logger.info("Advice job started")
 
-    # Transits are computed per-user inside _process_user, anchored to NOON UTC
-    # of each user's local date — so scores are date-stable and language-agnostic.
+    # Read the user list in one short session, then extract plain (id, language)
+    # values. Each _process_user opens its OWN session — never share a session
+    # across the concurrent gather below (asyncpg is not concurrency-safe).
     async with AsyncSessionLocal() as db:
         users = await get_all_active_users(db)
-        logger.info(f"Advice job: {len(users)} users to check")
+        user_rows = [(u.id, u.language or "en") for u in users]
+    logger.info(f"Advice job: {len(user_rows)} users to check")
 
-        batch_size = 5
-        for i in range(0, len(users), batch_size):
-            batch = users[i:i + batch_size]
-            tasks = []
-            for u in batch:
-                profile = await get_profile_by_user_id(db, u.id)
-                if not profile:
-                    continue
-                user_today = _user_local_date(profile.device_timezone)
-                tasks.append(
-                    _process_user(profile, u.id, u.language or "en", user_today, db)
-                )
-
-            if not tasks:
-                continue
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for j, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"Advice job error for user {batch[j].id}: {result}")
+    batch_size = 5
+    for i in range(0, len(user_rows), batch_size):
+        batch = user_rows[i:i + batch_size]
+        tasks = [_process_user(uid, lang) for (uid, lang) in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for (uid, _), result in zip(batch, results):
+            if isinstance(result, Exception):
+                logger.error(f"Advice job error for user {uid}: {result}")
 
     logger.info("Advice job completed")
 
